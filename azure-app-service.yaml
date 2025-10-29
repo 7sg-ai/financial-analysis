@@ -1,0 +1,93 @@
+# Azure App Service configuration for Streamlit deployment
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: streamlit-config
+data:
+  startup.sh: |
+    #!/bin/bash
+    echo "Starting Financial Analysis Streamlit App..."
+    
+    # Set environment variables
+    export PYTHONPATH=/app
+    export USE_LOCAL_SPARK=true
+    export SPARK_MASTER=local[*]
+    
+    # Start Streamlit
+    streamlit run streamlit_app.py \
+      --server.port=8501 \
+      --server.address=0.0.0.0 \
+      --server.headless=true \
+      --browser.gatherUsageStats=false \
+      --server.enableCORS=false \
+      --server.enableXsrfProtection=false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: financial-analysis-streamlit
+  labels:
+    app: financial-analysis-streamlit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: financial-analysis-streamlit
+  template:
+    metadata:
+      labels:
+        app: financial-analysis-streamlit
+    spec:
+      containers:
+      - name: streamlit-app
+        image: financialanalysisacr.azurecr.io/financial-analysis-streamlit:latest
+        ports:
+        - containerPort: 8501
+        env:
+        - name: AZURE_OPENAI_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: azure-secrets
+              key: openai-endpoint
+        - name: AZURE_OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: azure-secrets
+              key: openai-key
+        - name: AZURE_OPENAI_DEPLOYMENT_NAME
+          value: "gpt-4"
+        - name: USE_LOCAL_SPARK
+          value: "true"
+        - name: STREAMLIT_PORT
+          value: "8501"
+        - name: STREAMLIT_HOST
+          value: "0.0.0.0"
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2"
+          limits:
+            memory: "8Gi"
+            cpu: "4"
+        volumeMounts:
+        - name: startup-script
+          mountPath: /startup.sh
+          subPath: startup.sh
+        command: ["/bin/bash", "/startup.sh"]
+      volumes:
+      - name: startup-script
+        configMap:
+          name: streamlit-config
+          defaultMode: 0755
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: financial-analysis-streamlit-service
+spec:
+  selector:
+    app: financial-analysis-streamlit
+  ports:
+  - port: 80
+    targetPort: 8501
+  type: LoadBalancer

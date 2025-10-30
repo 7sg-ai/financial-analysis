@@ -66,5 +66,5 @@ htmlcov/
 *.bak
 *.cache
 
-# Exclude large data files from Git
-src_data/*.parquet
+# Exclude large data files from Git (except parquet files which are handled by LFS)
+# src_data/*.parquet  # Commented out - now using Git LFS

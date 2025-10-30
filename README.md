@@ -79,91 +79,75 @@ The application analyzes NYC Taxi and For-Hire Vehicle trip data:
 - Trip distances and durations
 - Location-based revenue
 
-## Installation
+## Azure Deployment
 
 ### Prerequisites
 
-- Python 3.9+
-- Azure OpenAI access (endpoint and API key)
-- 8GB+ RAM recommended for Spark
+- Azure subscription with appropriate permissions
+- Azure OpenAI service deployed
+- Azure Container Registry (for containerized deployment)
+- Azure App Service or Azure Container Instances
 
-### Setup
+### Quick Deploy to Azure
 
-1. **Clone or navigate to the repository**
+1. **Deploy the application to Azure**
 ```bash
-cd /Users/neebhatt/code/financial-analysis
+# Deploy both API and Streamlit UI
+./deploy_azure.sh --deploy-all
+
+# Or deploy components separately
+./deploy_azure.sh --deploy-api    # API only
+./deploy_azure.sh --deploy-ui     # Streamlit UI only
 ```
 
-2. **Create virtual environment**
-```bash
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+2. **Configure Azure environment variables**
+Set the following in your Azure App Service or Container Instance:
 ```
-
-3. **Install dependencies**
-```bash
-pip install -r requirements.txt
-```
-
-4. **Configure environment**
-```bash
-# Copy template
-cp .env.template .env
-
-# Edit .env and add your Azure credentials
-# Required:
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_API_KEY=your-api-key-here
 AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4
-
-# Optional (for Azure Synapse deployment):
 SYNAPSE_SPARK_POOL_NAME=your-spark-pool
 SYNAPSE_WORKSPACE_NAME=your-workspace
 ```
 
-5. **Download data files**
+3. **Download data in Azure environment**
 ```bash
-# Download NYC taxi data (6.7 GB)
-python download_data.py
+# SSH into your Azure container or use Azure Cloud Shell
+python3 download_data.py
 
-# Verify data files
-ls src_data/*.parquet
-# Should see yellow_tripdata_*, green_tripdata_*, fhv_tripdata_*, fhvhv_tripdata_*
+# Or download specific data subsets
+python3 download_data.py --years 2024 --service-types yellow --months 1 2 3
 ```
 
-**Note**: The data files are not included in the Git repository due to their large size (6.7 GB). Run the download script to get the data.
+**Note**: Data files are downloaded directly in the Azure environment after deployment. The download script supports flexible data selection to manage storage costs.
 
 ## Usage
 
-### Running Locally
+### Accessing the Application
 
-**Option 1: Streamlit Dashboard (Recommended)**
-```bash
-python run_streamlit.py
-```
-- **Dashboard**: http://localhost:8501
+After deployment to Azure, you can access the application through:
+
+**Streamlit Dashboard (Recommended)**
+- **URL**: `https://your-app-name.azurewebsites.net`
 - Interactive web interface with visualizations
+- Natural language query interface
+- Real-time data analysis
 
-**Option 2: API Server**
+**API Endpoints**
+- **Base URL**: `https://your-api-name.azurecontainer.io`
+- **API Documentation**: `https://your-api-name.azurecontainer.io/docs`
+- RESTful API for programmatic access
+
+### Testing the Deployment
+
+Test your deployed application:
 ```bash
-python run_local.py
+# Test API endpoint
+curl "https://your-api-name.azurecontainer.io/api/analyze?question=What was the total revenue in 2024?"
+
+# Test Streamlit UI
+# Open https://your-app-name.azurewebsites.net in your browser
 ```
-- **API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
-
-**Option 3: Direct uvicorn**
-```bash
-uvicorn api:app --reload
-```
-
-### Testing
-
-Run the test script to verify everything works:
-```bash
-python test_query.py
-```
-
-This will execute sample queries and display results.
 
 ## API Endpoints
 
@@ -304,53 +288,41 @@ print(response.to_markdown())
 engine.shutdown()
 ```
 
-## Deployment to Azure
+## Azure Architecture
 
-### Azure Synapse Deployment
+### Recommended Azure Setup
 
-1. **Upload code to Synapse workspace**
-```bash
-# Using Azure CLI
-az synapse workspace upload \
-  --workspace-name your-workspace \
-  --source . \
-  --destination /financial-analysis
-```
+1. **Azure Container Registry (ACR)**
+   - Store Docker images for API and Streamlit UI
+   - Enable admin access for deployment
 
-2. **Create Spark pool**
-- Node size: Medium (8 vCPU, 64 GB)
-- Autoscale: 3-10 nodes
-- Spark version: 3.4
+2. **Azure Container Instances (ACI)**
+   - Host the FastAPI backend
+   - Configure with appropriate CPU/memory for Spark workloads
 
-3. **Configure environment variables in Synapse**
-- Add secrets to Azure Key Vault
-- Reference in Synapse pipeline
+3. **Azure App Service**
+   - Host the Streamlit frontend
+   - Configure custom domain and SSL
 
-4. **Deploy API as Azure Function or Container**
-```bash
-# Using Azure Container Instances
-az container create \
-  --resource-group your-rg \
-  --name financial-analysis-api \
-  --image your-registry/financial-analysis:latest \
-  --environment-variables \
-    AZURE_OPENAI_ENDPOINT=... \
-    AZURE_OPENAI_API_KEY=...
-```
+4. **Azure Synapse Analytics**
+   - Spark pools for data processing
+   - Data lake storage for parquet files
 
-### Docker Deployment
+5. **Azure OpenAI Service**
+   - GPT-4 deployment for query generation
+   - Configure appropriate rate limits
 
-```dockerfile
-# Dockerfile provided in repository
-docker build -t financial-analysis .
-docker run -p 8000:8000 --env-file .env financial-analysis
-```
+### Data Storage Strategy
+
+- **Azure Data Lake Storage Gen2**: Store parquet files
+- **Azure Synapse**: Process queries using Spark pools
+- **Local container storage**: Cache frequently accessed data
 
 ## Project Structure
 
 ```
 financial-analysis/
-├── src_data/                      # Data files
+├── src_data/                      # Data files (downloaded in Azure)
 │   ├── yellow_tripdata_*.parquet
 │   ├── green_tripdata_*.parquet
 │   ├── fhv_tripdata_*.parquet
@@ -364,8 +336,11 @@ financial-analysis/
 ├── response_formatter.py          # Response formatting
 ├── analysis_engine.py             # Main orchestration engine
 ├── api.py                         # FastAPI REST API
-├── run_local.py                   # Local development script
-├── test_query.py                  # Testing script
+├── streamlit_app.py               # Streamlit web UI
+├── download_data.py               # Data download script
+├── deploy_azure.sh                # Azure deployment script
+├── Dockerfile                     # API container image
+├── Dockerfile.streamlit           # Streamlit container image
 ├── requirements.txt               # Python dependencies
 ├── .env.template                  # Environment template
 └── README.md                      # This file

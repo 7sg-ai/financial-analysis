@@ -1,153 +1,129 @@
-# Quick Start Guide
+# Quick Start Guide - Azure Deployment
 
-Get started with the Financial Analysis API in 5 minutes.
+Deploy the Financial Analysis API to Azure in 10 minutes.
 
 ## Prerequisites
 
-- Python 3.9 or higher
-- Azure OpenAI access (endpoint and API key)
-- 8GB RAM minimum
+- Azure subscription with appropriate permissions
+- Azure OpenAI service deployed
+- Azure Container Registry (ACR)
+- Azure CLI installed and configured
 
-## Installation Steps
+## Azure Deployment Steps
 
-### 1. Navigate to Project Directory
+### 1. Clone the Repository
 ```bash
-cd /Users/neebhatt/code/financial-analysis
+git clone https://github.com/7sg-ai/financial-analysis.git
+cd financial-analysis
 ```
 
-### 2. Create Virtual Environment
+### 2. Configure Azure Resources
+
+**Set up Azure Container Registry:**
 ```bash
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Create resource group
+az group create --name financial-analysis-rg --location eastus
+
+# Create container registry
+az acr create --resource-group financial-analysis-rg \
+  --name financialanalysisacr --sku Basic --admin-enabled true
 ```
 
-### 3. Install Dependencies
+**Deploy Azure OpenAI (if not already done):**
 ```bash
-pip install -r requirements.txt
+# Create Azure OpenAI resource
+az cognitiveservices account create \
+  --name financial-analysis-openai \
+  --resource-group financial-analysis-rg \
+  --location eastus \
+  --kind OpenAI \
+  --sku S0
 ```
 
-This will install:
-- PySpark for data processing
-- FastAPI for the REST API
-- Azure OpenAI SDK
-- All other required packages
+### 3. Deploy the Application
 
-### 4. Configure Environment
-
-Create a `.env` file with your Azure credentials:
-
+**Deploy both API and Streamlit UI:**
 ```bash
-# Copy the template
-cp .env.template .env
+# Make deployment script executable
+chmod +x deploy_azure.sh
 
-# Edit .env and add your credentials
-nano .env  # or use your preferred editor
+# Deploy everything
+./deploy_azure.sh --deploy-all
 ```
 
-**Required settings in `.env`:**
+**Or deploy components separately:**
+```bash
+# Deploy API only
+./deploy_azure.sh --deploy-api
+
+# Deploy Streamlit UI only  
+./deploy_azure.sh --deploy-ui
+```
+
+### 4. Configure Environment Variables
+
+Set the following in your Azure App Service or Container Instance:
+
 ```bash
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_API_KEY=your-actual-api-key-here
-AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4  # or your deployment name
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4
+SYNAPSE_SPARK_POOL_NAME=your-spark-pool
+SYNAPSE_WORKSPACE_NAME=your-workspace
 ```
 
-**How to get these values:**
-1. Go to [Azure Portal](https://portal.azure.com)
-2. Navigate to your Azure OpenAI resource
-3. Under "Keys and Endpoint":
-   - Copy the endpoint URL
-   - Copy one of the keys
-4. Under "Model deployments", note your GPT-4 deployment name
+### 5. Download Data in Azure
 
-### 5. Verify Data Files
-
-Ensure your data files are in the `src_data` directory:
-
+**SSH into your Azure container or use Azure Cloud Shell:**
 ```bash
-ls src_data/*.parquet
+# Download all data (2023-2025)
+python3 download_data.py
+
+# Or download specific subsets to manage costs
+python3 download_data.py --years 2024 --service-types yellow --months 1 2 3
 ```
 
-You should see files like:
-- `yellow_tripdata_2024-01.parquet`
-- `green_tripdata_2024-01.parquet`
-- `fhvhv_tripdata_2024-01.parquet`
-- etc.
+**Data download options:**
+- `--years 2023 2024 2025` - Select specific years
+- `--service-types yellow green fhv fhvhv` - Choose service types
+- `--months 1 2 3` - Select specific months
+- `--verbose` - Enable detailed logging
 
-## Running the Application
+## Accessing the Deployed Application
 
-### Option 1: Streamlit Dashboard (Recommended)
+### Streamlit Dashboard (Recommended)
 
-Start the interactive web dashboard:
+After deployment, access your dashboard at:
+- **URL**: `https://your-app-name.azurewebsites.net`
+- **Features**:
+  - 🎨 Beautiful web interface
+  - 📊 Interactive visualizations  
+  - 💡 Example questions
+  - 📚 Query history
+  - ⚡ Real-time results
 
+### API Endpoints
+
+Access the REST API at:
+- **Base URL**: `https://your-api-name.azurecontainer.io`
+- **API Documentation**: `https://your-api-name.azurecontainer.io/docs`
+- **Health Check**: `https://your-api-name.azurecontainer.io/health`
+
+### Testing the Deployment
+
+**Test API endpoint:**
 ```bash
-python run_streamlit.py
+curl "https://your-api-name.azurecontainer.io/api/analyze?question=What was the total revenue in 2024?"
 ```
 
-The dashboard will open at `http://localhost:8501`
-
-**Features:**
-- 🎨 Beautiful web interface
-- 📊 Interactive visualizations
-- 💡 Example questions
-- 📚 Query history
-- ⚡ Real-time results
-
-### Option 2: Quick Test (Verify Setup)
-
-Run a simple test to verify everything works:
-
-```bash
-python test_query.py
-```
-
-This will:
-- Initialize the Spark engine
-- Load January 2024 data
-- Execute 3 sample queries
-- Display results
-
-**Expected output:**
-```
-Starting Financial Analysis Engine...
-Loading data...
-Registered view: yellow_taxi (2845234 rows)
-...
-[Question 1/3]
-Q: How many yellow taxi trips were taken in January 2024?
-
-Generated Query:
-SELECT COUNT(*) as trip_count FROM yellow_taxi
-
-Results (1 rows):
-  trip_count
-------------
-    2845234
-
-Narrative:
-In January 2024, there were 2,845,234 yellow taxi trips...
-```
-
-### Option 3: API Server
-
-```bash
-python run_local.py
-```
-
-The API will start at `http://localhost:8000`
-
-You should see:
-```
-INFO:     Started server process
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:8000
-```
+**Test Streamlit UI:**
+Open `https://your-app-name.azurewebsites.net` in your browser
 
 ## Using the Application
 
 ### 1. Streamlit Dashboard (Recommended)
 
-1. Open http://localhost:8501 in your browser
+1. Open `https://your-app-name.azurewebsites.net` in your browser
 2. Click **"🚀 Initialize Engine"** in the sidebar
 3. Wait for the data to load (1-2 minutes)
 4. Type your question in the text area
@@ -164,12 +140,12 @@ INFO:     Uvicorn running on http://0.0.0.0:8000
 ### 2. API Server (Advanced Users)
 
 **Open API Documentation:**
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
+- **Swagger UI**: `https://your-api-name.azurecontainer.io/docs`
+- **ReDoc**: `https://your-api-name.azurecontainer.io/redoc`
 
 **Test with curl:**
 ```bash
-curl -X POST http://localhost:8000/api/analyze \
+curl -X POST https://your-api-name.azurecontainer.io/api/analyze \
   -H "Content-Type: application/json" \
   -d '{
     "question": "What was the total revenue from yellow taxis in January 2024?",
@@ -180,12 +156,12 @@ curl -X POST http://localhost:8000/api/analyze \
 **Try Example Questions:**
 ```bash
 # Revenue analysis
-curl -X POST http://localhost:8000/api/analyze \
+curl -X POST https://your-api-name.azurecontainer.io/api/analyze \
   -H "Content-Type: application/json" \
   -d '{"question": "What was the average fare for yellow taxis?"}'
 
 # Get as formatted table
-curl "http://localhost:8000/api/analyze/tabular?question=Show%20top%205%20pickup%20zones&format=grid"
+curl "https://your-api-name.azurecontainer.io/api/analyze/tabular?question=Show%20top%205%20pickup%20zones&format=grid"
 ```
 
 ## Example Questions to Try
@@ -213,36 +189,23 @@ Click any example question in the sidebar to auto-fill the query box:
 - "Which borough has the highest average fare?"
 - "Show revenue by service zone"
 
-## Python SDK Usage
+## Azure Integration
 
-You can also use the engine directly in Python:
+### Using Azure Synapse Spark
 
-```python
-from analysis_engine import FinancialAnalysisEngine
-from config import get_settings
+The application is designed to work with Azure Synapse Analytics:
 
-# Initialize
-settings = get_settings()
-engine = FinancialAnalysisEngine(settings)
-engine.initialize_data()
+1. **Configure Synapse connection** in your environment variables
+2. **Upload data** to Azure Data Lake Storage Gen2
+3. **Process queries** using Synapse Spark pools
+4. **Scale automatically** based on workload
 
-# Ask a question
-response = engine.analyze(
-    question="What was the total revenue from yellow taxis?",
-    return_format="both",
-    include_narrative=True
-)
+### Data Management in Azure
 
-# Print results
-print("Query:", response.query)
-print("\nResults:")
-print(response.to_tabular())
-print("\nNarrative:")
-print(response.narrative)
-
-# Cleanup
-engine.shutdown()
-```
+- **Download data** directly in Azure environment
+- **Store parquet files** in Azure Data Lake Storage
+- **Process with Spark** using Azure Synapse pools
+- **Cache results** for improved performance
 
 ## Streamlit Features
 
@@ -257,112 +220,81 @@ The dashboard includes:
 
 ## Troubleshooting
 
-### "Module not found" errors
+### Azure Deployment Issues
 
-Make sure you activated the virtual environment:
-```bash
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+**Container fails to start:**
+1. Check environment variables are set correctly
+2. Verify Azure OpenAI credentials
+3. Check container logs in Azure portal
+4. Ensure sufficient memory allocation
 
-Then reinstall dependencies:
-```bash
-pip install -r requirements.txt
-```
+**Data download fails:**
+1. Verify internet connectivity in Azure environment
+2. Check available disk space
+3. Use `--verbose` flag for detailed logging
+4. Try downloading smaller data subsets first
 
-### "Azure OpenAI" connection errors
+**API not responding:**
+1. Check Azure Container Instance health
+2. Verify port configuration (8000 for API)
+3. Check firewall rules
+4. Review application logs
 
-1. Check your `.env` file has correct values
-2. Verify the endpoint URL format: `https://your-resource.openai.azure.com/`
-3. Ensure your API key is valid
-4. Check you have access to the GPT-4 deployment
+### Azure OpenAI Connection Issues
 
-Test your credentials:
-```python
-from openai import AzureOpenAI
-import os
+1. Verify endpoint URL format: `https://your-resource.openai.azure.com/`
+2. Ensure API key is valid and not expired
+3. Check you have access to the GPT-4 deployment
+4. Verify the deployment name matches your configuration
 
-client = AzureOpenAI(
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-    api_version="2024-02-15-preview"
-)
+### Spark/Memory Issues
 
-# This should not raise an error
-print("Connection successful!")
-```
+**In Azure Container Instances:**
+1. Increase container memory allocation
+2. Use smaller data subsets for testing
+3. Configure Spark memory settings in environment variables
 
-### "Java not found" or Spark errors
-
-PySpark requires Java. Install Java 11 or 17:
-
-**macOS:**
-```bash
-brew install openjdk@17
-```
-
-**Ubuntu/Debian:**
-```bash
-sudo apt-get install openjdk-17-jre-headless
-```
-
-**Windows:**
-Download from [Oracle](https://www.oracle.com/java/technologies/downloads/) or [Adoptium](https://adoptium.net/)
-
-### Memory errors
-
-If you see "OutOfMemory" errors, increase Spark memory:
-
-```bash
-export SPARK_DRIVER_MEMORY=8g
-export SPARK_EXECUTOR_MEMORY=8g
-```
-
-Or load less data:
-```python
-# In Python
-engine.initialize_data(months=["01"], year="2024")  # Load only January
-```
-
-### Port already in use
-
-If port 8000 is busy, change it in `.env`:
-```bash
-API_PORT=8080
-```
+**Data loading slow:**
+1. Use specific year/month filters
+2. Enable Spark caching for repeated queries
+3. Consider using Azure Synapse for better performance
 
 ## Next Steps
 
 ### Learn More
 - Read the full [README.md](README.md) for detailed documentation
-- Check [USAGE_EXAMPLES.md](USAGE_EXAMPLES.md) for advanced examples
-- Explore the API at http://localhost:8000/docs
+- Explore the API at `https://your-api-name.azurecontainer.io/docs`
+- Check Azure portal for monitoring and logs
 
 ### Customize
 - Modify `schemas.py` to add new data sources
 - Extend `api.py` to add custom endpoints
-- Adjust Spark settings in `data_loader.py`
+- Adjust Spark settings for your workload
+- Configure Azure Synapse for better performance
 
-### Deploy to Azure
-- Follow the Azure deployment guide in README.md
-- Use the provided `Dockerfile` for containerization
-- Run `./deploy_azure.sh` for automated deployment
+### Scale and Optimize
+- Use Azure Synapse Spark pools for large datasets
+- Implement Azure Data Lake Storage for data persistence
+- Configure auto-scaling for variable workloads
+- Set up monitoring and alerting
 
 ## Support
 
 If you encounter issues:
 
-1. **Check logs**: The application logs detailed information
-2. **Test individual components**: Use `test_query.py`
-3. **Review query history**: Use the `/api/history` endpoint
-4. **Enable debug logging**: Set `LOG_LEVEL=DEBUG` in `.env`
+1. **Check Azure logs**: Review container and application logs in Azure portal
+2. **Monitor resources**: Check CPU, memory, and storage usage
+3. **Test connectivity**: Verify Azure OpenAI and Synapse connections
+4. **Review deployment**: Ensure all environment variables are set
 
 ## Summary
 
 You now have:
-✅ A working Financial Analysis API
+✅ A deployed Financial Analysis API in Azure
 ✅ LLM-powered natural language queries
-✅ Spark-based data processing
-✅ Multiple output formats (JSON, tables, narratives)
+✅ Spark-based data processing in the cloud
+✅ Scalable Azure architecture
+✅ Interactive Streamlit dashboard
 
-**Start analyzing your data!** 🚀
+**Start analyzing your data in the cloud!** 🚀☁️
 

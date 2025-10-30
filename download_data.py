@@ -3,27 +3,30 @@
 Data download script for Financial Analysis Application
 Downloads NYC taxi and for-hire vehicle data from the official source (2023-2025)
 
+IMPORTANT: This script is designed to run in Azure environments after deployment.
+Run this script in your Azure Container Instance or Azure Cloud Shell.
+
 Usage Examples:
     # Download all data (2023-2025, all service types, all months)
-    python download_data.py
+    python3 download_data.py
     
-    # Download only 2024 data
-    python download_data.py --years 2024
+    # Download only 2024 data (recommended for testing)
+    python3 download_data.py --years 2024
     
     # Download only yellow and green taxis
-    python download_data.py --service-types yellow green
+    python3 download_data.py --service-types yellow green
     
-    # Download only January and February
-    python download_data.py --months 1 2
+    # Download only January and February (cost-effective)
+    python3 download_data.py --months 1 2
     
-    # Download specific combination
-    python download_data.py --years 2024 --service-types yellow --months 1 2 3
+    # Download specific combination for testing
+    python3 download_data.py --years 2024 --service-types yellow --months 1 2 3
     
-    # Verbose output
-    python download_data.py --verbose
+    # Verbose output for debugging
+    python3 download_data.py --verbose
     
     # Show help
-    python download_data.py --help
+    python3 download_data.py --help
 
 Data Sources:
     - Yellow Taxi: https://d37ci6vzurychx.cloudfront.net/trip-data/
@@ -32,11 +35,17 @@ Data Sources:
     - FHVHV: https://d37ci6vzurychx.cloudfront.net/trip-data/
     - Taxi Zones: https://d37ci6vzurychx.cloudfront.net/misc/taxi_zones.zip
 
-Estimated Sizes:
+Estimated Sizes (for cost planning):
     - 2023: ~8-10 GB
     - 2024: ~8-10 GB  
     - 2025: ~8-10 GB (partial year)
     - Total: ~20-30 GB for all years
+
+Azure Deployment Notes:
+    - Run this script AFTER deploying to Azure
+    - Consider storage costs when selecting data subsets
+    - Use --months flag to limit data for testing
+    - Monitor Azure storage usage in the portal
 """
 import os
 import requests
@@ -160,8 +169,8 @@ def download_taxi_zones():
         return False
 
 def main():
-    """Main download function"""
-    parser = argparse.ArgumentParser(description="Download NYC Taxi Data (2023-2025)")
+    """Main download function for Azure deployment"""
+    parser = argparse.ArgumentParser(description="Download NYC Taxi Data (2023-2025) - Azure Deployment")
     parser.add_argument("--years", nargs="+", type=int, default=YEARS, 
                        help="Years to download (default: 2023 2024 2025)")
     parser.add_argument("--service-types", nargs="+", 
@@ -184,13 +193,15 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     
-    logger.info("🚕 Starting NYC Taxi Data Download")
-    logger.info("=" * 60)
+    logger.info("🚕 Starting NYC Taxi Data Download (Azure Environment)")
+    logger.info("=" * 70)
+    logger.info("☁️  Azure Deployment Mode - Data will be stored in container")
     logger.info(f"📅 Years: {', '.join(map(str, years))}")
     logger.info(f"📊 Service Types: {', '.join(args.service_types).title()}")
     logger.info(f"📈 Total Files: {len(years) * len(months) * len(args.service_types)} parquet files")
     logger.info(f"💾 Skip existing: {args.skip_existing}")
-    logger.info("=" * 60)
+    logger.info(f"💰 Estimated cost: ~${len(years) * len(months) * 0.5:.1f} in storage")
+    logger.info("=" * 70)
     
     # Download parquet data
     logger.info("📊 Downloading parquet data files...")
@@ -215,12 +226,14 @@ def main():
     
     if success == total and zones_success:
         logger.info("\n🎉 All data downloaded successfully!")
-        logger.info("You can now run the application with: python run_streamlit.py")
-        logger.info("Note: This is a large dataset. Consider using specific months for testing.")
+        logger.info("☁️  Data is now available in your Azure container")
+        logger.info("🌐 Access your application at the deployed URLs")
+        logger.info("💡 Consider using specific months for testing to reduce costs")
     else:
         logger.warning("\n⚠️  Some downloads failed. Check the logs above.")
-        logger.info("You can retry by running this script again.")
-        logger.info("Note: Some months may not be available yet (future dates).")
+        logger.info("🔄 You can retry by running this script again.")
+        logger.info("📅 Note: Some months may not be available yet (future dates).")
+        logger.info("💰 Consider downloading smaller data subsets to manage costs.")
 
 if __name__ == "__main__":
     main()

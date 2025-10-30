@@ -14,17 +14,11 @@ The Streamlit UI provides an interactive web interface for analyzing NYC taxi an
 
 ## Getting Started
 
-### 1. Launch the Dashboard
+### 1. Access the Deployed Dashboard
 
-```bash
-# Start Streamlit dashboard
-python run_streamlit.py
-
-# Or run directly
-streamlit run streamlit_app.py
-```
-
-The dashboard will open at http://localhost:8501
+After deploying to Azure, access your dashboard at:
+- **URL**: `https://your-app-name.azurewebsites.net`
+- **Features**: Interactive web interface with real-time analysis
 
 ### 2. Initialize the Engine
 

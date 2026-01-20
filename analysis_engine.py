@@ -36,12 +36,13 @@ class FinancialAnalysisEngine:
         self.settings = settings
         
         # Initialize Spark
+        # Spark session connects to Azure Synapse Spark pools remotely
         if spark_session:
             self.spark = spark_session
         else:
             self.spark = create_spark_session(
                 app_name="FinancialAnalysis",
-                master=settings.spark_master
+                settings=settings
             )
         
         # Initialize components

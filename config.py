@@ -16,11 +16,11 @@ class Settings(BaseSettings):
     azure_openai_deployment_name: str = Field(default="gpt-4", env="AZURE_OPENAI_DEPLOYMENT_NAME")
     azure_openai_api_version: str = Field(default="2024-02-15-preview", env="AZURE_OPENAI_API_VERSION")
     
-    # Azure Synapse Configuration
-    synapse_spark_pool_name: Optional[str] = Field(default=None, env="SYNAPSE_SPARK_POOL_NAME")
-    synapse_workspace_name: Optional[str] = Field(default=None, env="SYNAPSE_WORKSPACE_NAME")
-    azure_subscription_id: Optional[str] = Field(default=None, env="AZURE_SUBSCRIPTION_ID")
-    azure_resource_group: Optional[str] = Field(default=None, env="AZURE_RESOURCE_GROUP")
+    # Azure Synapse Configuration (Required)
+    synapse_spark_pool_name: str = Field(..., env="SYNAPSE_SPARK_POOL_NAME")
+    synapse_workspace_name: str = Field(..., env="SYNAPSE_WORKSPACE_NAME")
+    azure_subscription_id: str = Field(..., env="AZURE_SUBSCRIPTION_ID")
+    azure_resource_group: str = Field(..., env="AZURE_RESOURCE_GROUP")
     
     # Azure Storage Configuration
     azure_storage_account_name: Optional[str] = Field(default=None, env="AZURE_STORAGE_ACCOUNT_NAME")
@@ -43,10 +43,6 @@ class Settings(BaseSettings):
     streamlit_port: int = Field(default=8501, env="STREAMLIT_PORT")
     streamlit_host: str = Field(default="0.0.0.0", env="STREAMLIT_HOST")
     streamlit_theme: str = Field(default="light", env="STREAMLIT_THEME")
-    
-    # Spark Configuration
-    use_local_spark: bool = Field(default=True, env="USE_LOCAL_SPARK")
-    spark_master: str = Field(default="local[*]", env="SPARK_MASTER")
     
     class Config:
         env_file = ".env"

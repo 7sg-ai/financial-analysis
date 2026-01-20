@@ -1,4 +1,6 @@
 # Core Dependencies
+# Note: PySpark is required for Azure Synapse Spark API types
+# Spark execution happens remotely in Azure Synapse pools, not locally
 pyspark==3.5.0
 pyarrow==14.0.1
 pandas==2.1.4

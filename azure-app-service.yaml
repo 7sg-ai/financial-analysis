@@ -10,8 +10,7 @@ data:
     
     # Set environment variables
     export PYTHONPATH=/app
-    export USE_LOCAL_SPARK=true
-    export SPARK_MASTER=local[*]
+    # Azure Synapse Spark configuration is set via environment variables
     
     # Start Streamlit
     streamlit run streamlit_app.py \
@@ -56,8 +55,26 @@ spec:
               key: openai-key
         - name: AZURE_OPENAI_DEPLOYMENT_NAME
           value: "gpt-4"
-        - name: USE_LOCAL_SPARK
-          value: "true"
+        - name: SYNAPSE_SPARK_POOL_NAME
+          valueFrom:
+            secretKeyRef:
+              name: azure-secrets
+              key: synapse-spark-pool-name
+        - name: SYNAPSE_WORKSPACE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: azure-secrets
+              key: synapse-workspace-name
+        - name: AZURE_SUBSCRIPTION_ID
+          valueFrom:
+            secretKeyRef:
+              name: azure-secrets
+              key: subscription-id
+        - name: AZURE_RESOURCE_GROUP
+          valueFrom:
+            secretKeyRef:
+              name: azure-secrets
+              key: resource-group
         - name: STREAMLIT_PORT
           value: "8501"
         - name: STREAMLIT_HOST

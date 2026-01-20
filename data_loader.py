@@ -4,7 +4,7 @@ Handles loading parquet files and CSV data into Spark DataFrames
 """
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.types import *
-from typing import Optional, List, Dict, Union
+from typing import Optional, List, Dict, Union, Any
 import os
 import glob
 from pathlib import Path
@@ -177,25 +177,54 @@ class DataLoader:
         """
         logger.info("Registering temporary views for all datasets...")
         
+        views_registered = []
+        
         # Load and register yellow taxi
         df_yellow = self.load_yellow_taxi(months, year)
-        df_yellow.createOrReplaceTempView("yellow_taxi")
-        logger.info(f"Registered view: yellow_taxi ({df_yellow.count()} rows)")
+        if df_yellow is not None:
+            df_yellow.createOrReplaceTempView("yellow_taxi")
+            row_count = df_yellow.count()
+            logger.info(f"Registered view: yellow_taxi ({row_count} rows)")
+            views_registered.append("yellow_taxi")
+        else:
+            logger.warning("No yellow taxi data files found, skipping view registration")
         
         # Load and register green taxi
         df_green = self.load_green_taxi(months, year)
-        df_green.createOrReplaceTempView("green_taxi")
-        logger.info(f"Registered view: green_taxi ({df_green.count()} rows)")
+        if df_green is not None:
+            df_green.createOrReplaceTempView("green_taxi")
+            row_count = df_green.count()
+            logger.info(f"Registered view: green_taxi ({row_count} rows)")
+            views_registered.append("green_taxi")
+        else:
+            logger.warning("No green taxi data files found, skipping view registration")
         
         # Load and register FHV
         df_fhv = self.load_fhv(months, year)
-        df_fhv.createOrReplaceTempView("fhv")
-        logger.info(f"Registered view: fhv ({df_fhv.count()} rows)")
+        if df_fhv is not None:
+            df_fhv.createOrReplaceTempView("fhv")
+            row_count = df_fhv.count()
+            logger.info(f"Registered view: fhv ({row_count} rows)")
+            views_registered.append("fhv")
+        else:
+            logger.warning("No FHV data files found, skipping view registration")
         
         # Load and register FHVHV
         df_fhvhv = self.load_fhvhv(months, year)
-        df_fhvhv.createOrReplaceTempView("fhvhv")
-        logger.info(f"Registered view: fhvhv ({df_fhvhv.count()} rows)")
+        if df_fhvhv is not None:
+            df_fhvhv.createOrReplaceTempView("fhvhv")
+            row_count = df_fhvhv.count()
+            logger.info(f"Registered view: fhvhv ({row_count} rows)")
+            views_registered.append("fhvhv")
+        else:
+            logger.warning("No FHVHV data files found, skipping view registration")
+        
+        if views_registered:
+            logger.info(f"Successfully registered {len(views_registered)} view(s): {', '.join(views_registered)}")
+        else:
+            logger.warning("No data files found. Views will be registered when data becomes available.")
+        
+        return len(views_registered) > 0
         
         # Load and register zones
         df_zones = self.load_taxi_zones()
@@ -230,7 +259,8 @@ class DataLoader:
         all_files = glob.glob(str(self.data_path / pattern))
         
         if not all_files:
-            raise FileNotFoundError(f"No files found matching pattern: {pattern}")
+            logger.warning(f"No files found matching pattern: {pattern}")
+            return None
         
         # Filter by months if specified
         if months:
@@ -246,9 +276,10 @@ class DataLoader:
             files_to_load = all_files
         
         if not files_to_load:
-            raise FileNotFoundError(
+            logger.warning(
                 f"No files found for months {months} with pattern: {pattern}"
             )
+            return None
         
         logger.info(f"Loading {len(files_to_load)} parquet file(s): {pattern}")
         

@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 
 from config import get_settings
@@ -24,6 +25,22 @@ logger = logging.getLogger(__name__)
 engine: Optional[FinancialAnalysisEngine] = None
 
 
+async def poll_for_data_files():
+    """Background task to periodically check for new data files"""
+    global engine
+    poll_interval = 300  # Check every 5 minutes
+    
+    while True:
+        try:
+            await asyncio.sleep(poll_interval)
+            if engine:
+                engine.check_and_reload_data()
+        except Exception as e:
+            logger.error(f"Error in data polling task: {e}")
+            # Continue polling even if there's an error
+            await asyncio.sleep(poll_interval)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan"""
@@ -35,8 +52,17 @@ async def lifespan(app: FastAPI):
     
     try:
         engine = FinancialAnalysisEngine(settings)
-        engine.initialize_data()
-        logger.info("Financial Analysis Engine initialized successfully")
+        # Try to initialize data, but don't fail if no files exist yet
+        try:
+            engine.initialize_data()
+            logger.info("Financial Analysis Engine initialized successfully")
+        except Exception as e:
+            logger.warning(f"Data initialization skipped (no files found): {e}")
+            logger.info("Application will start and poll for data files periodically")
+        
+        # Start background task to poll for new data files
+        poll_task = asyncio.create_task(poll_for_data_files())
+        logger.info("Started background task to poll for new data files (every 5 minutes)")
     except Exception as e:
         logger.error(f"Failed to initialize engine: {e}")
         raise

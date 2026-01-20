@@ -4,18 +4,16 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies
+# Note: Java/PySpark not needed - Azure Synapse Spark runs remotely
 RUN apt-get update && apt-get install -y \
-    openjdk-17-jre-headless \
     procps \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Set JAVA_HOME
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-
 # Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Use Streamlit-specific requirements (no PySpark needed - calls API backend)
+COPY requirements-streamlit.txt .
+RUN pip install --no-cache-dir -r requirements-streamlit.txt
 
 # Copy application code
 COPY *.py ./
@@ -29,8 +27,6 @@ EXPOSE 8501
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV USE_LOCAL_SPARK=true
-ENV SPARK_MASTER=local[*]
 ENV STREAMLIT_PORT=8501
 ENV STREAMLIT_HOST=0.0.0.0
 

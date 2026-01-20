@@ -67,46 +67,62 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Initialize session state
-if 'analysis_engine' not in st.session_state:
-    st.session_state.analysis_engine = None
-if 'query_history' not in st.session_state:
-    st.session_state.query_history = []
+if 'api_url' not in st.session_state:
+    # Default to API backend URL, can be overridden via environment variable
+    import os
+    st.session_state.api_url = os.getenv("API_URL", "http://localhost:8000")
 if 'api_available' not in st.session_state:
     st.session_state.api_available = False
+if 'query_history' not in st.session_state:
+    st.session_state.query_history = []
 
-def initialize_engine():
-    """Initialize the analysis engine"""
+def check_api_health():
+    """Check if the API backend is available"""
     try:
-        from analysis_engine import FinancialAnalysisEngine
-        from config import get_settings
-        
-        if st.session_state.analysis_engine is None:
-            with st.spinner("Initializing Financial Analysis Engine..."):
-                settings = get_settings()
-                engine = FinancialAnalysisEngine(settings)
-                engine.initialize_data(months=["01", "02", "03"], year="2024")  # Load first 3 months for demo
-                st.session_state.analysis_engine = engine
-                st.session_state.api_available = True
-                st.success("✅ Engine initialized successfully!")
+        import httpx
+        response = httpx.get(f"{st.session_state.api_url}/health", timeout=5.0)
+        st.session_state.api_available = response.status_code == 200
+        return st.session_state.api_available
     except Exception as e:
-        st.error(f"❌ Failed to initialize engine: {str(e)}")
         st.session_state.api_available = False
+        return False
+
+def initialize_api():
+    """Initialize connection to the API backend"""
+    if not st.session_state.api_available:
+        with st.spinner("Connecting to Financial Analysis API..."):
+            if check_api_health():
+                st.success("✅ Connected to API backend successfully!")
+            else:
+                st.error(f"❌ Failed to connect to API backend at {st.session_state.api_url}")
+                st.info("Make sure the FastAPI backend is running and accessible.")
 
 def call_api(question: str, return_format: str = "both", include_narrative: bool = True) -> Optional[Dict[str, Any]]:
-    """Call the analysis API"""
-    if not st.session_state.api_available or st.session_state.analysis_engine is None:
-        return None
+    """Call the analysis API backend"""
+    if not st.session_state.api_available:
+        initialize_api()
+        if not st.session_state.api_available:
+            return None
     
     try:
-        response = st.session_state.analysis_engine.analyze(
-            question=question,
-            return_format=return_format,
-            include_narrative=include_narrative,
-            max_rows=1000
+        import httpx
+        response = httpx.post(
+            f"{st.session_state.api_url}/api/analyze",
+            json={
+                "question": question,
+                "return_format": return_format,
+                "include_narrative": include_narrative,
+                "max_rows": 1000
+            },
+            timeout=300.0  # 5 minute timeout for long queries
         )
-        return response.to_dict()
-    except Exception as e:
+        response.raise_for_status()
+        return response.json()
+    except httpx.HTTPError as e:
         st.error(f"API Error: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error calling API: {str(e)}")
         return None
 
 def display_results(results: Dict[str, Any]):
@@ -189,15 +205,17 @@ def main():
     with st.sidebar:
         st.markdown("### 🎯 Quick Actions")
         
-        # Initialize engine button
-        if st.button("🚀 Initialize Engine", type="primary"):
-            initialize_engine()
+        # Connect to API button
+        if st.button("🚀 Connect to API", type="primary"):
+            initialize_api()
         
-        # Engine status
+        # API status
         if st.session_state.api_available:
-            st.success("✅ Engine Ready")
+            st.success("✅ API Connected")
+            st.info(f"Backend: {st.session_state.api_url}")
         else:
-            st.warning("⚠️ Engine Not Initialized")
+            st.warning("⚠️ API Not Connected")
+            st.info("Click 'Connect to API' to connect to the backend")
         
         st.markdown("---")
         

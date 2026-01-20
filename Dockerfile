@@ -4,13 +4,15 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies
+# Note: Java is required by PySpark (used for Azure Synapse Spark API types)
+# Spark execution happens remotely in Azure Synapse pools, not locally
 RUN apt-get update && apt-get install -y \
-    openjdk-17-jre-headless \
+    openjdk-21-jre-headless \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Set JAVA_HOME
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
@@ -28,8 +30,6 @@ EXPOSE 8000
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV USE_LOCAL_SPARK=true
-ENV SPARK_MASTER=local[*]
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

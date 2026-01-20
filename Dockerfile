@@ -11,7 +11,17 @@ RUN apt-get update && apt-get install -y \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
-# Set JAVA_HOME
+# Create a wrapper script to set JAVA_HOME dynamically based on architecture
+# This works for both amd64 and arm64 architectures
+RUN echo '#!/bin/bash\n\
+JAVA_DIR=$(find /usr/lib/jvm -maxdepth 1 -type d -name "java-21-openjdk-*" | head -1)\n\
+if [ -n "$JAVA_DIR" ]; then\n\
+    export JAVA_HOME="$JAVA_DIR"\n\
+fi\n\
+exec "$@"' > /usr/local/bin/run-with-java.sh && \
+    chmod +x /usr/local/bin/run-with-java.sh
+
+# Default JAVA_HOME (will be overridden by wrapper script)
 ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 
 # Copy requirements and install Python dependencies
@@ -35,6 +45,6 @@ ENV PYTHONUNBUFFERED=1
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:8000/health')" || exit 1
 
-# Run the application
-CMD ["python", "run_local.py"]
+# Run the application using uvicorn with dynamic JAVA_HOME
+CMD ["/usr/local/bin/run-with-java.sh", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
 

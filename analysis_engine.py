@@ -84,9 +84,62 @@ class FinancialAnalysisEngine:
             return
         
         logger.info("Initializing data and registering views...")
-        self.data_loader.register_temp_views(months=months, year=year)
-        self._data_loaded = True
-        logger.info("Data initialization complete")
+        success = self.data_loader.register_temp_views(months=months, year=year)
+        if success:
+            self._data_loaded = True
+            logger.info("Data initialization complete")
+        else:
+            logger.warning("No data files found at startup. Application will start but queries may fail until data is available.")
+            logger.info("The application will periodically check for new data files.")
+    
+    def check_and_reload_data(
+        self,
+        months: Optional[List[str]] = None,
+        year: str = "2024"
+    ) -> bool:
+        """
+        Check for new data files and reload if found
+        
+        Args:
+            months: Months to check (None = all)
+            year: Year to check data for
+            
+        Returns:
+            True if new data was loaded, False otherwise
+        """
+        if self._data_loaded:
+            # Check if there are new files
+            import glob
+            from pathlib import Path
+            data_path = Path(self.settings.data_path)
+            
+            patterns = [
+                f"yellow_tripdata_{year}-*.parquet",
+                f"green_tripdata_{year}-*.parquet",
+                f"fhv_tripdata_{year}-*.parquet",
+                f"fhvhv_tripdata_{year}-*.parquet"
+            ]
+            
+            has_new_files = any(
+                glob.glob(str(data_path / pattern))
+                for pattern in patterns
+            )
+            
+            if not has_new_files:
+                return False
+        
+        # Try to reload data
+        logger.info("Checking for new data files...")
+        success = self.data_loader.register_temp_views(months=months, year=year)
+        if success and not self._data_loaded:
+            self._data_loaded = True
+            logger.info("New data files detected and loaded successfully")
+            return True
+        elif success:
+            logger.info("Data views refreshed with new files")
+            return True
+        
+        return False
     
     def analyze(
         self,

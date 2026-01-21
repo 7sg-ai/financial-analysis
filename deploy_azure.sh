@@ -323,6 +323,17 @@ fi  # End of skip resource creation for option 4
 
 # Build Docker images
 echo ""
+echo "Ensuring Git LFS files are fetched..."
+if command -v git-lfs &> /dev/null; then
+    git lfs fetch --all
+    git lfs pull
+    echo "✓ Git LFS files fetched"
+else
+    echo "⚠ git-lfs not found. If src_data/*.parquet files are LFS-tracked, they may not be included in the build."
+    echo "  Install git-lfs: https://git-lfs.github.com/"
+fi
+echo ""
+
 if [ "$USE_ACR_BUILD" = "true" ]; then
     echo "Building Docker images using Azure Container Registry Build..."
     echo "Packing and uploading source code (excluding files in .dockerignore)..."

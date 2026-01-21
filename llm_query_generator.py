@@ -21,8 +21,8 @@ class QueryGenerator:
         self,
         endpoint: str,
         api_key: str,
-        deployment_name: str = "gpt-4",
-        api_version: str = "2024-02-15-preview"
+        deployment_name: str = "gpt-5.2-chat",
+        api_version: str = "2024-12-01-preview"
     ):
         """
         Initialize QueryGenerator
@@ -33,8 +33,26 @@ class QueryGenerator:
             deployment_name: Deployment name for the model
             api_version: API version to use
         """
+        # Normalize endpoint: remove trailing slash and ensure correct format
+        # Azure OpenAI SDK expects: https://your-resource.openai.azure.com (no trailing slash)
+        normalized_endpoint = endpoint.rstrip('/')
+        
+        # Validate endpoint format
+        if not normalized_endpoint.startswith('https://'):
+            raise ValueError(f"Invalid endpoint format: {endpoint}. Must start with https://")
+        
+        # Warn if using generic cognitive services endpoint instead of OpenAI-specific endpoint
+        if 'api.cognitive.microsoft.com' in normalized_endpoint:
+            logger.warning(
+                f"Endpoint appears to be generic Cognitive Services endpoint: {normalized_endpoint}. "
+                f"Azure OpenAI requires a resource-specific endpoint like: https://your-resource.openai.azure.com"
+            )
+        
+        logger.info(f"Using Azure OpenAI endpoint: {normalized_endpoint}")
+        logger.info(f"Deployment name: {deployment_name}")
+        
         self.client = AzureOpenAI(
-            azure_endpoint=endpoint,
+            azure_endpoint=normalized_endpoint,
             api_key=api_key,
             api_version=api_version
         )
@@ -75,14 +93,15 @@ class QueryGenerator:
         user_prompt = self._build_user_prompt(user_question, include_explanation)
         
         try:
+            # GPT-5.2 requires max_completion_tokens instead of max_tokens
+            # SDK 2.x supports max_completion_tokens directly
             response = self.client.chat.completions.create(
                 model=self.deployment_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.1,  # Low temperature for more consistent SQL generation
-                max_tokens=2000,
+                max_completion_tokens=2000,  # Limit response length for SQL queries
                 response_format={"type": "json_object"}
             )
             
@@ -184,8 +203,7 @@ Return your response as JSON with the following structure:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.1,
-                max_tokens=2000,
+                max_completion_tokens=2000,  # Limit response length for refined queries
                 response_format={"type": "json_object"}
             )
             
@@ -231,8 +249,7 @@ Return your response as JSON:
                     {"role": "system", "content": "You are a data analysis assistant specializing in NYC taxi and ride-share data."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
-                max_tokens=500,
+                max_completion_tokens=500,  # Short explanations
                 response_format={"type": "json_object"}
             )
             
@@ -315,12 +332,18 @@ class NarrativeGenerator:
         self,
         endpoint: str,
         api_key: str,
-        deployment_name: str = "gpt-4",
-        api_version: str = "2024-02-15-preview"
+        deployment_name: str = "gpt-5.2-chat",
+        api_version: str = "2024-12-01-preview"
     ):
         """Initialize NarrativeGenerator with Azure OpenAI client"""
+        # Normalize endpoint: remove trailing slash
+        normalized_endpoint = endpoint.rstrip('/')
+        
+        logger.info(f"Using Azure OpenAI endpoint: {normalized_endpoint}")
+        logger.info(f"Deployment name: {deployment_name}")
+        
         self.client = AzureOpenAI(
-            azure_endpoint=endpoint,
+            azure_endpoint=normalized_endpoint,
             api_key=api_key,
             api_version=api_version
         )
@@ -391,8 +414,7 @@ Write in a professional but accessible tone. Use specific numbers from the resul
                     {"role": "system", "content": "You are a data analyst specializing in transportation and financial analysis."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
-                max_tokens=1000
+                max_completion_tokens=1000  # Limit narrative length
             )
             
             narrative = response.choices[0].message.content

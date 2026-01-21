@@ -74,10 +74,26 @@ MONTHS = list(range(1, 13))  # 1-12
 
 def download_file(url: str, filepath: Path, retries: int = 3) -> bool:
     """Download a file from URL to filepath with retry logic"""
+    # Use a browser-like User-Agent to avoid CloudFront WAF challenges
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
     for attempt in range(retries):
         try:
             logger.info(f"Downloading {filepath.name}... (attempt {attempt + 1}/{retries})")
-            response = requests.get(url, stream=True, timeout=30)
+            response = requests.get(url, stream=True, timeout=30, headers=headers)
+            
+            # Check for 403 Forbidden specifically (data not available)
+            if response.status_code == 403:
+                logger.warning(f"⚠️  Access forbidden (403) for {filepath.name} - data may not be publicly available")
+                return False
+            
+            # Check for 404 Not Found (file doesn't exist)
+            if response.status_code == 404:
+                logger.warning(f"⚠️  File not found (404) for {filepath.name} - may not exist for this date")
+                return False
+            
             response.raise_for_status()
             
             with open(filepath, 'wb') as f:
@@ -88,13 +104,24 @@ def download_file(url: str, filepath: Path, retries: int = 3) -> bool:
             file_size = filepath.stat().st_size / (1024 * 1024)  # MB
             logger.info(f"✅ Downloaded {filepath.name} ({file_size:.1f} MB)")
             return True
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code in [403, 404]:
+                # Don't retry for these errors
+                logger.warning(f"⚠️  Skipping {filepath.name}: HTTP {e.response.status_code}")
+                return False
+            logger.warning(f"⚠️  Attempt {attempt + 1} failed for {filepath.name}: {e}")
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)  # Exponential backoff
+            else:
+                logger.error(f"❌ Failed to download {filepath.name} after {retries} attempts")
         except Exception as e:
             logger.warning(f"⚠️  Attempt {attempt + 1} failed for {filepath.name}: {e}")
             if attempt < retries - 1:
                 time.sleep(2 ** attempt)  # Exponential backoff
             else:
                 logger.error(f"❌ Failed to download {filepath.name} after {retries} attempts")
-                return False
+    
+    return False
 
 def download_parquet_data(service_types=None, years=None, months=None, skip_existing=True):
     """Download all parquet data files for specified years and service types"""
@@ -149,7 +176,11 @@ def download_taxi_zones():
     
     try:
         logger.info("Downloading taxi zones...")
-        response = requests.get(DATA_URLS["taxi_zones"])
+        # Use a browser-like User-Agent to avoid CloudFront WAF challenges
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        response = requests.get(DATA_URLS["taxi_zones"], headers=headers)
         response.raise_for_status()
         
         with open(zip_path, 'wb') as f:

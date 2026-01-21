@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     # Azure OpenAI Configuration
     azure_openai_endpoint: str = Field(..., env="AZURE_OPENAI_ENDPOINT")
     azure_openai_api_key: str = Field(..., env="AZURE_OPENAI_API_KEY")
-    azure_openai_deployment_name: str = Field(default="gpt-4", env="AZURE_OPENAI_DEPLOYMENT_NAME")
-    azure_openai_api_version: str = Field(default="2024-02-15-preview", env="AZURE_OPENAI_API_VERSION")
+    azure_openai_deployment_name: str = Field(default="gpt-5.2-chat", env="AZURE_OPENAI_DEPLOYMENT_NAME")
+    azure_openai_api_version: str = Field(default="2024-12-01-preview", env="AZURE_OPENAI_API_VERSION")
     
     # Azure Synapse Configuration (Required)
     synapse_spark_pool_name: str = Field(..., env="SYNAPSE_SPARK_POOL_NAME")

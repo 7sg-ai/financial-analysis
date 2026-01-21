@@ -14,9 +14,9 @@ from contextlib import asynccontextmanager
 from config import get_settings
 from analysis_engine import FinancialAnalysisEngine
 
-# Configure logging
+# Configure logging - set to DEBUG for troubleshooting
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -151,6 +151,8 @@ async def root():
             "suggestions": "/api/suggestions - Get query suggestions",
             "datasets": "/api/datasets - Get dataset information",
             "history": "/api/history - Get query history",
+            "data_status": "/api/data-status - Get status of data files and loaded views",
+            "reload_data": "/api/reload-data - Manually trigger data reload from files",
             "health": "/health - Health check"
         }
     }
@@ -169,6 +171,124 @@ async def health_check():
     }
 
 
+@app.get("/api/data-status")
+async def get_data_status():
+    """
+    Get status of data files and loaded views
+    
+    Shows what files exist in src_data directory and what Spark SQL views are currently registered.
+    """
+    if engine is None:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+    
+    try:
+        import glob
+        from pathlib import Path
+        
+        # Get data path from settings
+        data_path = Path(engine.settings.data_path)
+        
+        # List all parquet files in the data directory
+        parquet_files = []
+        if data_path.exists():
+            for pattern in ["yellow_tripdata_*.parquet", "green_tripdata_*.parquet", 
+                          "fhv_tripdata_*.parquet", "fhvhv_tripdata_*.parquet"]:
+                files = glob.glob(str(data_path / pattern))
+                parquet_files.extend([Path(f).name for f in files])
+        
+        parquet_files.sort()
+        
+        # Get registered Spark SQL views
+        registered_views = []
+        view_details = {}
+        
+        try:
+            # List all temp views
+            temp_views = engine.spark.catalog.listTables()
+            for view in temp_views:
+                if view.tableType == "TEMPORARY":
+                    view_name = view.name
+                    registered_views.append(view_name)
+                    
+                    # Get row count for each view
+                    try:
+                        row_count = engine.spark.sql(f"SELECT COUNT(*) as cnt FROM {view_name}").collect()[0]["cnt"]
+                        view_details[view_name] = {
+                            "row_count": row_count,
+                            "exists": True
+                        }
+                    except Exception as e:
+                        view_details[view_name] = {
+                            "row_count": None,
+                            "exists": True,
+                            "error": str(e)
+                        }
+        except Exception as e:
+            logger.warning(f"Error listing views: {e}")
+        
+        # Expected views
+        expected_views = ["yellow_taxi", "green_taxi", "fhv", "fhvhv"]
+        
+        return {
+            "data_loaded": engine._data_loaded,
+            "data_path": str(data_path),
+            "files": {
+                "total_parquet_files": len(parquet_files),
+                "parquet_files": parquet_files,
+                "files_by_type": {
+                    "yellow": [f for f in parquet_files if f.startswith("yellow")],
+                    "green": [f for f in parquet_files if f.startswith("green")],
+                    "fhv": [f for f in parquet_files if f.startswith("fhv_tripdata")],
+                    "fhvhv": [f for f in parquet_files if f.startswith("fhvhv")]
+                }
+            },
+            "views": {
+                "registered": registered_views,
+                "expected": expected_views,
+                "missing": [v for v in expected_views if v not in registered_views],
+                "details": view_details
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting data status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get data status: {str(e)}")
+
+
+@app.post("/api/reload-data")
+async def reload_data(
+    year: str = Query(default="2024", description="Year to load data for"),
+    months: Optional[List[str]] = Query(default=None, description="Months to load (e.g., ['01', '02'])")
+):
+    """
+    Manually trigger data reload from files in src_data directory
+    
+    This endpoint checks for new parquet files and reloads/refreshes the Spark SQL views.
+    Useful when files have been added after the initial startup.
+    """
+    if engine is None:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+    
+    try:
+        logger.info(f"Manual data reload triggered for year={year}, months={months}")
+        success = engine.check_and_reload_data(months=months, year=year)
+        
+        if success:
+            return {
+                "status": "success",
+                "message": "Data reloaded successfully",
+                "data_loaded": engine._data_loaded
+            }
+        else:
+            return {
+                "status": "no_change",
+                "message": "No new data files found or data already loaded",
+                "data_loaded": engine._data_loaded
+            }
+    except Exception as e:
+        logger.error(f"Error reloading data: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to reload data: {str(e)}")
+
+
 @app.post("/api/analyze", response_model=AnalysisResult)
 async def analyze(request: AnalysisRequest):
     """
@@ -181,6 +301,7 @@ async def analyze(request: AnalysisRequest):
     
     try:
         logger.info(f"Received analysis request: {request.question}")
+        logger.debug(f"Request parameters: return_format={request.return_format}, include_narrative={request.include_narrative}, max_rows={request.max_rows}")
         
         response = engine.analyze(
             question=request.question,
@@ -189,7 +310,18 @@ async def analyze(request: AnalysisRequest):
             max_rows=request.max_rows
         )
         
-        return response.to_dict()
+        # Debug: Log response structure
+        response_dict = response.to_dict()
+        logger.info(f"Analysis response structure: keys={list(response_dict.keys())}")
+        logger.info(f"Response result_count: {response_dict.get('result_count', 'N/A')}")
+        logger.info(f"Response results type: {type(response_dict.get('results'))}")
+        logger.info(f"Response results length: {len(response_dict.get('results', []))}")
+        if response_dict.get('results'):
+            logger.debug(f"First result sample: {response_dict['results'][0] if len(response_dict['results']) > 0 else 'N/A'}")
+        logger.debug(f"Response metadata: {response_dict.get('metadata', {})}")
+        logger.debug(f"Response narrative present: {bool(response_dict.get('narrative'))}")
+        
+        return response_dict
         
     except Exception as e:
         logger.error(f"Error processing analysis request: {e}", exc_info=True)

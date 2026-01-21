@@ -9,6 +9,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     openjdk-21-jre-headless \
     procps \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a wrapper script to set JAVA_HOME dynamically based on architecture

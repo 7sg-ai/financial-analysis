@@ -12,8 +12,11 @@ import time
 import logging
 from typing import Dict, Any, List, Optional
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging - set to DEBUG for troubleshooting
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Page configuration
@@ -67,14 +70,27 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Initialize session state
-if 'api_url' not in st.session_state:
-    # Default to API backend URL, can be overridden via environment variable
-    import os
-    st.session_state.api_url = os.getenv("API_URL", "http://localhost:8000")
+import os
+
+# Always read API_URL from environment variable (can change between restarts)
+# This ensures the app uses the latest environment variable value
+env_api_url = os.getenv("API_URL", "http://localhost:8000")
+if 'api_url' not in st.session_state or st.session_state.api_url != env_api_url:
+    # Update session state if environment variable changed or not set
+    st.session_state.api_url = env_api_url
+    logger.info(f"API URL set from environment: {env_api_url}")
+    # Reset API availability when URL changes
+    if 'api_url' in st.session_state and st.session_state.api_url != env_api_url:
+        logger.info(f"API URL changed from {st.session_state.api_url} to {env_api_url}, resetting connection")
+        st.session_state.api_available = False
+
 if 'api_available' not in st.session_state:
     st.session_state.api_available = False
 if 'query_history' not in st.session_state:
     st.session_state.query_history = []
+
+# Log the current API URL being used
+logger.info(f"Using API URL: {st.session_state.api_url} (from env: {env_api_url})")
 
 def check_api_health():
     """Check if the API backend is available"""
@@ -89,46 +105,102 @@ def check_api_health():
 
 def initialize_api():
     """Initialize connection to the API backend"""
+    # Re-read API_URL from environment in case it changed
+    env_api_url = os.getenv("API_URL", "http://localhost:8000")
+    if st.session_state.api_url != env_api_url:
+        logger.info(f"API URL changed, updating from {st.session_state.api_url} to {env_api_url}")
+        st.session_state.api_url = env_api_url
+        st.session_state.api_available = False
+    
     if not st.session_state.api_available:
+        logger.info(f"Initializing API connection to: {st.session_state.api_url}")
         with st.spinner("Connecting to Financial Analysis API..."):
             if check_api_health():
                 st.success("✅ Connected to API backend successfully!")
             else:
                 st.error(f"❌ Failed to connect to API backend at {st.session_state.api_url}")
                 st.info("Make sure the FastAPI backend is running and accessible.")
+                logger.warning(f"Failed to connect to API at {st.session_state.api_url}")
 
 def call_api(question: str, return_format: str = "both", include_narrative: bool = True) -> Optional[Dict[str, Any]]:
     """Call the analysis API backend"""
+    logger.info(f"call_api called with question: {question[:100]}...")
+    logger.debug(f"API URL: {st.session_state.api_url}")
+    logger.debug(f"Parameters: return_format={return_format}, include_narrative={include_narrative}")
+    
     if not st.session_state.api_available:
+        logger.info("API not available, initializing...")
         initialize_api()
         if not st.session_state.api_available:
+            logger.error("API initialization failed")
             return None
     
     try:
         import httpx
+        request_payload = {
+            "question": question,
+            "return_format": return_format,
+            "include_narrative": include_narrative,
+            "max_rows": 1000
+        }
+        logger.debug(f"Sending POST request to {st.session_state.api_url}/api/analyze")
+        logger.debug(f"Request payload: {request_payload}")
+        
         response = httpx.post(
             f"{st.session_state.api_url}/api/analyze",
-            json={
-                "question": question,
-                "return_format": return_format,
-                "include_narrative": include_narrative,
-                "max_rows": 1000
-            },
+            json=request_payload,
             timeout=300.0  # 5 minute timeout for long queries
         )
+        
+        logger.info(f"API response status: {response.status_code}")
         response.raise_for_status()
-        return response.json()
+        
+        response_json = response.json()
+        logger.info(f"API response received. Response keys: {list(response_json.keys())}")
+        logger.debug(f"Response result_count: {response_json.get('result_count', 'N/A')}")
+        logger.debug(f"Response results type: {type(response_json.get('results'))}")
+        logger.debug(f"Response results length: {len(response_json.get('results', []))}")
+        logger.debug(f"Response has narrative: {bool(response_json.get('narrative'))}")
+        logger.debug(f"Response metadata: {response_json.get('metadata', {})}")
+        
+        if response_json.get('results'):
+            logger.debug(f"First result sample: {response_json['results'][0] if len(response_json['results']) > 0 else 'N/A'}")
+        else:
+            logger.warning("API response has empty results!")
+            logger.debug(f"Full response structure: {response_json}")
+        
+        return response_json
     except httpx.HTTPError as e:
+        logger.error(f"API HTTP Error: {str(e)}")
+        logger.error(f"Response status: {e.response.status_code if hasattr(e, 'response') else 'N/A'}")
+        logger.error(f"Response text: {e.response.text if hasattr(e, 'response') and hasattr(e.response, 'text') else 'N/A'}")
         st.error(f"API Error: {str(e)}")
         return None
     except Exception as e:
+        logger.error(f"Error calling API: {str(e)}", exc_info=True)
         st.error(f"Error calling API: {str(e)}")
         return None
 
 def display_results(results: Dict[str, Any]):
     """Display analysis results in various formats"""
-    if not results or not results.get('results'):
+    logger.info("display_results called")
+    logger.debug(f"Results parameter type: {type(results)}")
+    logger.debug(f"Results is None: {results is None}")
+    logger.debug(f"Results keys: {list(results.keys()) if results else 'N/A'}")
+    logger.debug(f"Results.get('results'): {results.get('results') if results else 'N/A'}")
+    logger.debug(f"Results.get('results') type: {type(results.get('results')) if results else 'N/A'}")
+    logger.debug(f"Results.get('results') length: {len(results.get('results', [])) if results else 'N/A'}")
+    logger.debug(f"Results.get('result_count'): {results.get('result_count') if results else 'N/A'}")
+    
+    if not results:
+        logger.warning("display_results: results parameter is None or empty")
         st.warning("No results to display")
+        return
+    
+    if not results.get('results'):
+        logger.warning(f"display_results: results.get('results') is empty. Full results dict: {results}")
+        st.warning("No results to display")
+        logger.debug(f"Results structure: {json.dumps(results, indent=2, default=str)}")
         return
     
     # Results summary
@@ -213,8 +285,15 @@ def main():
         if st.session_state.api_available:
             st.success("✅ API Connected")
             st.info(f"Backend: {st.session_state.api_url}")
+            # Show environment variable value for debugging
+            env_api_url = os.getenv("API_URL", "Not set")
+            if env_api_url != st.session_state.api_url:
+                st.warning(f"⚠️ Env API_URL ({env_api_url}) differs from session ({st.session_state.api_url})")
         else:
             st.warning("⚠️ API Not Connected")
+            st.info(f"API URL: {st.session_state.api_url}")
+            env_api_url = os.getenv("API_URL", "Not set")
+            st.info(f"Environment API_URL: {env_api_url}")
             st.info("Click 'Connect to API' to connect to the backend")
         
         st.markdown("---")
@@ -345,10 +424,12 @@ def main():
     
     # Handle analyze button
     if analyze_button and question:
+        logger.info(f"Analyze button clicked with question: {question}")
         with st.spinner("🤔 Analyzing your question..."):
             start_time = time.time()
             
             # Call the analysis API
+            logger.debug("Calling call_api function...")
             results = call_api(
                 question=question,
                 return_format="both",
@@ -356,8 +437,11 @@ def main():
             )
             
             end_time = time.time()
+            logger.info(f"API call completed in {end_time - start_time:.2f} seconds")
+            logger.debug(f"Results returned from call_api: {results is not None}")
             
             if results:
+                logger.info("Results received, adding to history and displaying...")
                 # Add to query history
                 st.session_state.query_history.append((question, datetime.now()))
                 
@@ -369,7 +453,9 @@ def main():
                 # Show performance info
                 st.success(f"✅ Analysis completed in {end_time - start_time:.2f} seconds")
             else:
+                logger.error("call_api returned None - no results received")
                 st.error("❌ Failed to analyze the question. Please try again.")
+                st.info("Check the logs for detailed error information.")
     
     # Show recent queries if any
     if st.session_state.query_history:

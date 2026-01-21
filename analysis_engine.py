@@ -205,10 +205,17 @@ class FinancialAnalysisEngine:
             
             # Step 3: Execute query
             logger.info("Executing query...")
+            logger.debug(f"Executing SQL query: {query}")
             execution_result = self.query_executor.execute_query(
                 query=query,
                 max_rows=max_rows
             )
+            
+            logger.debug(f"Query execution result keys: {list(execution_result.keys())}")
+            logger.debug(f"Query execution success: {execution_result.get('success')}")
+            logger.debug(f"Query execution error: {execution_result.get('error', 'None')}")
+            logger.debug(f"Query execution data type: {type(execution_result.get('data'))}")
+            logger.debug(f"Query execution data length: {len(execution_result.get('data', []))}")
             
             if not execution_result['success']:
                 error_msg = execution_result.get('error', 'Unknown error')
@@ -228,6 +235,14 @@ class FinancialAnalysisEngine:
             execution_time = execution_result['execution_time_ms']
             
             logger.info(f"Query executed successfully: {len(results)} rows in {execution_time}ms")
+            logger.debug(f"Results type: {type(results)}")
+            logger.debug(f"Results is list: {isinstance(results, list)}")
+            if results:
+                logger.debug(f"First result type: {type(results[0])}")
+                logger.debug(f"First result keys: {list(results[0].keys()) if isinstance(results[0], dict) else 'Not a dict'}")
+                logger.debug(f"First result sample: {results[0] if len(results) > 0 else 'N/A'}")
+            else:
+                logger.warning("Query execution returned empty results list!")
             
             # Step 4: Generate narrative (if requested)
             narrative = None
@@ -245,6 +260,9 @@ class FinancialAnalysisEngine:
                     narrative = f"Note: Could not generate narrative explanation. {query_explanation}"
             
             # Step 5: Create response
+            logger.debug(f"Creating AnalysisResponse with {len(results)} results")
+            logger.debug(f"Results before creating response: {results[:2] if len(results) > 0 else 'Empty'}")
+            
             response = AnalysisResponse(
                 question=question,
                 query=query,
@@ -260,6 +278,8 @@ class FinancialAnalysisEngine:
                 }
             )
             
+            logger.debug(f"Response created. Response.results type: {type(response.results)}")
+            logger.debug(f"Response.results length: {len(response.results)}")
             logger.info("Analysis complete")
             return response
             

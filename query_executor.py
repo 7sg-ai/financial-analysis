@@ -71,22 +71,36 @@ class QueryExecutor:
         
         try:
             logger.info(f"Executing query: {query[:100]}...")
+            logger.debug(f"Query parameters: max_rows={max_rows}, return_dataframe={return_dataframe}")
+            logger.debug(f"Full query: {query}")
             
             # Execute query
+            logger.debug("Calling spark.sql()...")
             df = self.spark.sql(query)
+            logger.debug(f"Query executed. DataFrame type: {type(df)}")
             
             # Get column names
             result['columns'] = df.columns
+            logger.debug(f"Query returned columns: {result['columns']}")
             
             # Determine row limit
             limit = max_rows if max_rows is not None else self.max_result_rows
+            logger.debug(f"Row limit: {limit}")
             
             # Collect results
+            logger.debug("Collecting results from DataFrame...")
             rows = df.limit(limit).collect()
             result['row_count'] = len(rows)
+            logger.debug(f"Collected {result['row_count']} rows")
             
             # Convert to dictionaries
+            logger.debug("Converting rows to dictionaries...")
             result['data'] = [row.asDict() for row in rows]
+            logger.debug(f"Converted to {len(result['data'])} dictionaries")
+            if result['data']:
+                logger.debug(f"First row sample: {result['data'][0]}")
+            else:
+                logger.warning("Query returned 0 rows!")
             
             # Include DataFrame if requested
             if return_dataframe:
@@ -97,6 +111,9 @@ class QueryExecutor:
             result['execution_time_ms'] = int((end_time - start_time).total_seconds() * 1000)
             
             result['success'] = True
+            
+            logger.debug(f"Query execution result structure: success={result['success']}, row_count={result['row_count']}, data_length={len(result['data'])}")
+            logger.debug(f"Result keys: {list(result.keys())}")
             
             # Log to history
             self._add_to_history(query, True, result['execution_time_ms'], result['row_count'])

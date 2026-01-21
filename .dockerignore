@@ -49,9 +49,9 @@ logs/
 .env.local
 .env.*.local
 
-# Data files (will be downloaded in Azure)
-src_data/*.parquet
-src_data/*.csv
+# Data files - INCLUDED in container (pre-populated from repo)
+# src_data/*.parquet
+# src_data/*.csv
 
 # Development files
 *.ipynb

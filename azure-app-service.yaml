@@ -54,7 +54,7 @@ spec:
               name: azure-secrets
               key: openai-key
         - name: AZURE_OPENAI_DEPLOYMENT_NAME
-          value: "gpt-4"
+          value: "gpt-5.2-chat"
         - name: SYNAPSE_SPARK_POOL_NAME
           valueFrom:
             secretKeyRef:

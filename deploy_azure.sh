@@ -13,8 +13,9 @@ echo "Choose deployment type:"
 echo "1) API only (FastAPI)"
 echo "2) Streamlit UI only"
 echo "3) Both API and Streamlit UI"
+echo "4) Update images only (rebuild and update existing containers)"
 echo ""
-read -p "Enter choice (1-3): " DEPLOYMENT_CHOICE
+read -p "Enter choice (1-4): " DEPLOYMENT_CHOICE
 
 # Configuration
 RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-financial-analysis-rg}"
@@ -40,15 +41,50 @@ SYNAPSE_ADMIN_USER="${SYNAPSE_ADMIN_USER:-sqladmin}"
 SYNAPSE_ADMIN_PASSWORD="${SYNAPSE_ADMIN_PASSWORD:-$(openssl rand -base64 32)}"
 
 # Set deployment-specific variables
-if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
+if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ] || [ "$DEPLOYMENT_CHOICE" = "4" ]; then
     API_IMAGE_NAME="financial-analysis-api"
     API_CONTAINER_NAME="financial-analysis-api"
 fi
 
-if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
+if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ] || [ "$DEPLOYMENT_CHOICE" = "4" ]; then
     STREAMLIT_IMAGE_NAME="financial-analysis-streamlit"
     STREAMLIT_APP_NAME="financial-analysis-streamlit"
     APP_SERVICE_PLAN="financial-analysis-plan"
+fi
+
+# For option 4, determine what to update based on what exists
+if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
+    UPDATE_API=false
+    UPDATE_STREAMLIT=false
+    
+    # Check if API container exists
+    if az container show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        UPDATE_API=true
+        echo "✓ Found API container: $API_CONTAINER_NAME"
+    fi
+    
+    # Check if Streamlit web app exists
+    if az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        UPDATE_STREAMLIT=true
+        echo "✓ Found Streamlit web app: $STREAMLIT_APP_NAME"
+    fi
+    
+    if [ "$UPDATE_API" = false ] && [ "$UPDATE_STREAMLIT" = false ]; then
+        echo "✗ No existing containers or web apps found to update."
+        echo "  Please use options 1-3 to deploy first."
+        exit 1
+    fi
+    
+    # Override deployment choice for image building
+    if [ "$UPDATE_API" = true ] && [ "$UPDATE_STREAMLIT" = true ]; then
+        IMAGE_BUILD_CHOICE="3"  # Build both
+    elif [ "$UPDATE_API" = true ]; then
+        IMAGE_BUILD_CHOICE="1"  # Build API only
+    else
+        IMAGE_BUILD_CHOICE="2"  # Build Streamlit only
+    fi
+else
+    IMAGE_BUILD_CHOICE="$DEPLOYMENT_CHOICE"
 fi
 
 echo ""
@@ -116,9 +152,11 @@ az group create \
 
 echo "✓ Resource group ready"
 
-# Create Azure OpenAI service if it doesn't exist
-echo ""
-echo "Checking Azure OpenAI service..."
+# Skip Azure resource creation for image update only
+if [ "$DEPLOYMENT_CHOICE" != "4" ]; then
+    # Create Azure OpenAI service if it doesn't exist
+    echo ""
+    echo "Checking Azure OpenAI service..."
 if ! az cognitiveservices account show --name "$OPENAI_RESOURCE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
     echo "Creating Azure OpenAI service..."
     az cognitiveservices account create \
@@ -142,26 +180,25 @@ if ! az cognitiveservices account show --name "$OPENAI_RESOURCE_NAME" --resource
     
     echo "✓ Azure OpenAI endpoint: $AZURE_OPENAI_ENDPOINT"
     
-    # Deploy GPT-4 model if not already deployed
-    echo "Checking for GPT-4 deployment..."
+    # Deploy GPT-5.2-chat model if not already deployed
+    echo "Checking for GPT-5.2-chat deployment..."
     if ! az cognitiveservices account deployment show \
         --name "$OPENAI_DEPLOYMENT_NAME" \
         --account-name "$OPENAI_RESOURCE_NAME" \
         --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-        echo "Deploying GPT-4 model (this may take several minutes)..."
+        echo "Deploying GPT-5.2-chat model (this may take several minutes)..."
         az cognitiveservices account deployment create \
             --name "$OPENAI_DEPLOYMENT_NAME" \
             --account-name "$OPENAI_RESOURCE_NAME" \
             --resource-group "$RESOURCE_GROUP" \
             --model-format OpenAI \
-            --model-name gpt-4 \
-            --model-version "0613" \
+            --model-name gpt-5.2-chat \
             --sku-capacity 10 \
             --sku-name "Standard" \
             --output none
-        echo "✓ GPT-4 deployment created"
+        echo "✓ GPT-5.2-chat deployment created"
     else
-        echo "✓ GPT-4 deployment already exists"
+        echo "✓ GPT-5.2-chat deployment already exists"
     fi
 else
     echo "✓ Azure OpenAI service exists"
@@ -268,7 +305,7 @@ else
     echo "✓ Spark pool exists"
 fi
 
-# Create container registry if it doesn't exist
+# Create container registry if it doesn't exist (needed for all options)
 echo "Checking container registry..."
 if ! az acr show --name "$CONTAINER_REGISTRY" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
     echo "Creating container registry..."
@@ -282,6 +319,7 @@ if ! az acr show --name "$CONTAINER_REGISTRY" --resource-group "$RESOURCE_GROUP"
 else
     echo "✓ Container registry exists"
 fi
+fi  # End of skip resource creation for option 4
 
 # Build Docker images
 echo ""
@@ -322,7 +360,7 @@ if [ "$USE_ACR_BUILD" = "true" ]; then
         done
     }
     
-    if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
+    if [ "$IMAGE_BUILD_CHOICE" = "1" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
         echo "Building API image using ACR Build (Linux/AMD64)..."
         if acr_build_with_retry "$CONTAINER_REGISTRY" "$API_IMAGE_NAME:$IMAGE_TAG" "linux/amd64" "Dockerfile"; then
             API_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.azurecr.io/$API_IMAGE_NAME:$IMAGE_TAG"
@@ -333,7 +371,7 @@ if [ "$USE_ACR_BUILD" = "true" ]; then
         fi
     fi
     
-    if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
+    if [ "$IMAGE_BUILD_CHOICE" = "2" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
         echo "Building Streamlit image using ACR Build (Linux/AMD64)..."
         if acr_build_with_retry "$CONTAINER_REGISTRY" "$STREAMLIT_IMAGE_NAME:$IMAGE_TAG" "linux/amd64" "Dockerfile.streamlit"; then
             STREAMLIT_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.azurecr.io/$STREAMLIT_IMAGE_NAME:$IMAGE_TAG"
@@ -348,13 +386,13 @@ else
     echo "Note: Building for Linux/AMD64 to ensure compatibility with Azure Container Instances"
     
     # Build locally using Docker with Linux/AMD64 platform
-    if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
+    if [ "$IMAGE_BUILD_CHOICE" = "1" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
         echo "Building API image locally..."
         docker build --platform linux/amd64 -t "$API_IMAGE_NAME:$IMAGE_TAG" .
         echo "✓ API image built locally"
     fi
     
-    if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
+    if [ "$IMAGE_BUILD_CHOICE" = "2" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
         echo "Building Streamlit image locally..."
         docker build --platform linux/amd64 -f Dockerfile.streamlit -t "$STREAMLIT_IMAGE_NAME:$IMAGE_TAG" .
         echo "✓ Streamlit image built locally"
@@ -364,7 +402,7 @@ else
     az acr login --name "$CONTAINER_REGISTRY"
     
     # Push images to registry
-    if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
+    if [ "$IMAGE_BUILD_CHOICE" = "1" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
         echo "Pushing API image to registry..."
         API_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.azurecr.io/$API_IMAGE_NAME:$IMAGE_TAG"
         docker tag "$API_IMAGE_NAME:$IMAGE_TAG" "$API_FULL_IMAGE_NAME"
@@ -372,7 +410,7 @@ else
         echo "✓ API image pushed successfully"
     fi
     
-    if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
+    if [ "$IMAGE_BUILD_CHOICE" = "2" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
         echo "Pushing Streamlit image to registry..."
         STREAMLIT_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.azurecr.io/$STREAMLIT_IMAGE_NAME:$IMAGE_TAG"
         docker tag "$STREAMLIT_IMAGE_NAME:$IMAGE_TAG" "$STREAMLIT_FULL_IMAGE_NAME"
@@ -384,8 +422,139 @@ fi
 # Get registry credentials
 echo ""
 echo "Retrieving registry credentials..."
-ACR_USERNAME=$(az acr credential show --name "$CONTAINER_REGISTRY" --query username -o tsv)
-ACR_PASSWORD=$(az acr credential show --name "$CONTAINER_REGISTRY" --query "passwords[0].value" -o tsv)
+admin_enabled=$(az acr show --name "$CONTAINER_REGISTRY" --query "adminUserEnabled" -o tsv 2>/dev/null || echo "false")
+if [ "$admin_enabled" != "true" ]; then
+    echo "ACR admin user is disabled. Enabling admin user to retrieve credentials..."
+    az acr update --name "$CONTAINER_REGISTRY" --admin-enabled true --output none
+    echo "Waiting for admin user to be enabled..."
+    sleep 3
+fi
+
+ACR_USERNAME=$(az acr credential show --name "$CONTAINER_REGISTRY" --query username -o tsv 2>/dev/null)
+ACR_PASSWORD=$(az acr credential show --name "$CONTAINER_REGISTRY" --query "passwords[0].value" -o tsv 2>/dev/null)
+
+if [ -z "$ACR_USERNAME" ] || [ -z "$ACR_PASSWORD" ]; then
+    echo "⚠️  Warning: Failed to retrieve ACR credentials"
+    echo "  Username: ${ACR_USERNAME:-empty}"
+    echo "  Password: ${ACR_PASSWORD:+***set***}${ACR_PASSWORD:-empty}"
+    echo ""
+    echo "Trying to enable admin user again..."
+    az acr update --name "$CONTAINER_REGISTRY" --admin-enabled true --output none
+    sleep 5
+    ACR_USERNAME=$(az acr credential show --name "$CONTAINER_REGISTRY" --query username -o tsv 2>/dev/null)
+    ACR_PASSWORD=$(az acr credential show --name "$CONTAINER_REGISTRY" --query "passwords[0].value" -o tsv 2>/dev/null)
+    
+    if [ -z "$ACR_USERNAME" ] || [ -z "$ACR_PASSWORD" ]; then
+        echo "✗ Still unable to retrieve credentials. Manual intervention may be required."
+        echo "  Run: az acr credential show --name $CONTAINER_REGISTRY"
+    else
+        echo "✓ Credentials retrieved successfully"
+    fi
+else
+    echo "✓ Registry credentials retrieved"
+fi
+if [ -z "$ACR_USERNAME" ] || [ -z "$ACR_PASSWORD" ]; then
+    echo "✗ Failed to retrieve ACR credentials."
+    echo ""
+    echo "Manual commands:"
+    echo "  az acr update --name $CONTAINER_REGISTRY --admin-enabled true"
+    echo "  az acr credential show --name $CONTAINER_REGISTRY"
+    echo ""
+    echo "Press Enter to continue with the deployment script (you can configure credentials manually later), or Ctrl+C to abort..."
+    read -r
+fi
+
+# Update existing containers/web apps with new images (option 4)
+if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
+    echo ""
+    echo "=================================="
+    echo "Updating Container Images"
+    echo "=================================="
+    
+    # Get registry credentials if not already set
+    if [ -z "$ACR_USERNAME" ] || [ -z "$ACR_PASSWORD" ]; then
+        echo "Retrieving registry credentials..."
+        ACR_USERNAME=$(az acr credential show --name "$CONTAINER_REGISTRY" --query username -o tsv)
+        ACR_PASSWORD=$(az acr credential show --name "$CONTAINER_REGISTRY" --query "passwords[0].value" -o tsv)
+    fi
+    
+    # Update API container
+    if [ "$UPDATE_API" = true ]; then
+        echo ""
+        echo "Updating API container with new image..."
+        API_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.azurecr.io/$API_IMAGE_NAME:$IMAGE_TAG"
+        
+        # Update container image
+        UPDATE_OUTPUT=$(az container update \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$API_CONTAINER_NAME" \
+            --image "$API_FULL_IMAGE_NAME" \
+            --registry-login-server "$CONTAINER_REGISTRY.azurecr.io" \
+            --registry-username "$ACR_USERNAME" \
+            --registry-password "$ACR_PASSWORD" \
+            --output json 2>&1)
+        
+        if [ $? -eq 0 ]; then
+            echo "✓ API container image updated"
+            echo "Restarting container..."
+            az container restart --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --output none
+            echo "✓ API container restarted"
+        else
+            echo "✗ Failed to update API container"
+            echo "Error: $UPDATE_OUTPUT"
+        fi
+    fi
+    
+    # Update Streamlit web app
+    if [ "$UPDATE_STREAMLIT" = true ]; then
+        echo ""
+        echo "Updating Streamlit web app with new image..."
+        # Use the image name that was built (should already be set, but ensure it's correct)
+        if [ -z "$STREAMLIT_FULL_IMAGE_NAME" ]; then
+            STREAMLIT_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.azurecr.io/$STREAMLIT_IMAGE_NAME:$IMAGE_TAG"
+        fi
+        
+        # Update web app container image
+        UPDATE_OUTPUT=$(az webapp config container set \
+            --name "$STREAMLIT_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --docker-custom-image-name "$STREAMLIT_FULL_IMAGE_NAME" \
+            --docker-registry-server-url "https://$CONTAINER_REGISTRY.azurecr.io" \
+            --docker-registry-server-user "$ACR_USERNAME" \
+            --docker-registry-server-password "$ACR_PASSWORD" \
+            --output json 2>&1)
+        
+        if [ $? -eq 0 ]; then
+            echo "✓ Streamlit web app image updated"
+            echo "Restarting web app..."
+            az webapp restart --resource-group "$RESOURCE_GROUP" --name "$STREAMLIT_APP_NAME" --output none
+            echo "✓ Streamlit web app restarted"
+        else
+            echo "✗ Failed to update Streamlit web app"
+            echo "Error: $UPDATE_OUTPUT"
+        fi
+    fi
+    
+    echo ""
+    echo "=================================="
+    echo "Image Update Complete!"
+    echo "=================================="
+    echo ""
+    if [ "$UPDATE_API" = true ]; then
+        API_FQDN=$(az container show --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --query ipAddress.fqdn -o tsv 2>/dev/null)
+        if [ -n "$API_FQDN" ] && [ "$API_FQDN" != "null" ]; then
+            echo "🚀 API URL: http://$API_FQDN:8000"
+        fi
+    fi
+    if [ "$UPDATE_STREAMLIT" = true ]; then
+        STREAMLIT_URL=$(az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" --query defaultHostName -o tsv 2>/dev/null)
+        if [ -n "$STREAMLIT_URL" ] && [ "$STREAMLIT_URL" != "null" ]; then
+            echo "🌐 Streamlit Dashboard: https://$STREAMLIT_URL"
+        fi
+    fi
+    echo ""
+    exit 0
+fi
 
 # Deploy based on choice
 echo ""
@@ -439,20 +608,21 @@ create_container() {
     # Check if container already exists
     echo "Checking if container '$container_name' already exists..."
     if az container show --resource-group "$resource_group" --name "$container_name" &> /dev/null; then
-        echo "⚠️  Container '$container_name' already exists. Checking status..."
+        echo "✓ Container '$container_name' already exists. Checking status..."
         local container_state=$(az container show --resource-group "$resource_group" --name "$container_name" --query "containers[0].instanceView.currentState.state" -o tsv 2>/dev/null || echo "unknown")
+        local container_ip=$(az container show --resource-group "$resource_group" --name "$container_name" --query "ipAddress.ip" -o tsv 2>/dev/null || echo "N/A")
+        local container_fqdn=$(az container show --resource-group "$resource_group" --name "$container_name" --query "ipAddress.fqdn" -o tsv 2>/dev/null || echo "N/A")
+        
         echo "  Current state: $container_state"
-        read -p "  Delete existing container and recreate? (y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            echo "Deleting existing container..."
-            az container delete --resource-group "$resource_group" --name "$container_name" --yes --output none
-            echo "Waiting 10 seconds for deletion to complete..."
-            sleep 10
-        else
-            echo "Skipping container creation. Using existing container."
-            return 0
+        if [ "$container_ip" != "N/A" ]; then
+            echo "  IP Address: $container_ip"
         fi
+        if [ "$container_fqdn" != "N/A" ]; then
+            echo "  FQDN: $container_fqdn"
+        fi
+        echo ""
+        echo "Skipping container creation. Using existing container."
+        return 0
     fi
     
     echo ""
@@ -467,28 +637,8 @@ create_container() {
     echo "  OS Type: Linux"
     echo ""
     
-    # Build the command for display
-    local create_cmd="az container create \\
-    --resource-group $resource_group \\
-    --name $container_name \\
-    --image $image \\
-    --registry-login-server $registry_server \\
-    --registry-username $registry_user \\
-    --registry-password '$registry_pass' \\
-    --dns-name-label $dns_label \\
-    --os-type Linux \\
-    --ports 8000 \\
-    --cpu 4 \\
-    --memory 8 \\
-    --environment-variables \\
-        AZURE_OPENAI_ENDPOINT=\"$AZURE_OPENAI_ENDPOINT\" \\
-        AZURE_OPENAI_API_KEY=\"$AZURE_OPENAI_API_KEY\" \\
-        AZURE_OPENAI_DEPLOYMENT_NAME=\"${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-4}\" \\
-        SYNAPSE_SPARK_POOL_NAME=\"$SYNAPSE_SPARK_POOL_NAME\" \\
-        SYNAPSE_WORKSPACE_NAME=\"$SYNAPSE_WORKSPACE_NAME\" \\
-        AZURE_SUBSCRIPTION_ID=\"$AZURE_SUBSCRIPTION_ID\" \\
-        AZURE_RESOURCE_GROUP=\"$AZURE_RESOURCE_GROUP\" \\
-        API_PORT=8000"
+    # Build the command for display (single-line format for easy copy-paste)
+    local create_cmd="az container create --resource-group $resource_group --name $container_name --image $image --registry-login-server $registry_server --registry-username $registry_user --registry-password '$registry_pass' --dns-name-label $dns_label --os-type Linux --ports 8000 --cpu 4 --memory 8 --environment-variables AZURE_OPENAI_ENDPOINT=\"$AZURE_OPENAI_ENDPOINT\" AZURE_OPENAI_API_KEY=\"$AZURE_OPENAI_API_KEY\" AZURE_OPENAI_DEPLOYMENT_NAME=\"${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}\" SYNAPSE_SPARK_POOL_NAME=\"$SYNAPSE_SPARK_POOL_NAME\" SYNAPSE_WORKSPACE_NAME=\"$SYNAPSE_WORKSPACE_NAME\" AZURE_SUBSCRIPTION_ID=\"$AZURE_SUBSCRIPTION_ID\" AZURE_RESOURCE_GROUP=\"$AZURE_RESOURCE_GROUP\" API_PORT=8000"
     
     # Create container with verbose output for debugging
     local create_output=$(az container create \
@@ -506,7 +656,7 @@ create_container() {
         --environment-variables \
             AZURE_OPENAI_ENDPOINT="$AZURE_OPENAI_ENDPOINT" \
             AZURE_OPENAI_API_KEY="$AZURE_OPENAI_API_KEY" \
-            AZURE_OPENAI_DEPLOYMENT_NAME="${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-4}" \
+            AZURE_OPENAI_DEPLOYMENT_NAME="${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}" \
             SYNAPSE_SPARK_POOL_NAME="$SYNAPSE_SPARK_POOL_NAME" \
             SYNAPSE_WORKSPACE_NAME="$SYNAPSE_WORKSPACE_NAME" \
             AZURE_SUBSCRIPTION_ID="$AZURE_SUBSCRIPTION_ID" \
@@ -595,7 +745,8 @@ create_container() {
         
         echo "=========================================="
         echo ""
-        read -p "Press Enter to continue with the deployment script (you can deploy the container manually later), or Ctrl+C to abort..."
+        echo "Press Enter to continue with the deployment script (you can deploy the container manually later), or Ctrl+C to abort..."
+        read -r
         echo ""
         echo "⚠️  Continuing script execution. Container deployment will be skipped."
         return 2  # Special return code to indicate failure but continue script
@@ -626,7 +777,8 @@ create_container() {
         echo ""
         echo "=========================================="
         echo ""
-        read -p "Press Enter to continue with the deployment script (you can deploy the container manually later), or Ctrl+C to abort..."
+        echo "Press Enter to continue with the deployment script (you can deploy the container manually later), or Ctrl+C to abort..."
+        read -r
         echo ""
         echo "⚠️  Continuing script execution. Container deployment will be skipped."
         return 2  # Special return code to indicate failure but continue script
@@ -724,134 +876,158 @@ deploy_streamlit_app() {
     echo "  Location: $location"
     echo ""
     
-    # Create App Service Plan
-    echo "Creating/checking App Service Plan..."
-    if ! az appservice plan show --name "$app_service_plan" --resource-group "$resource_group" &> /dev/null; then
-        local plan_output=$(az appservice plan create \
-            --name "$app_service_plan" \
-            --resource-group "$resource_group" \
-            --location "$location" \
-            --is-linux \
-            --sku B2 \
-            --output json 2>&1)
+    # Note: App Service Plan is checked/created before calling this function
+    # No need to check again here
+    
+    # Check if web app already exists
+    echo ""
+    echo "Checking if Streamlit web app '$app_name' already exists..."
+    local webapp_exists=false
+    local webapp_state="unknown"
+    local webapp_url="N/A"
+    local health_check_passed=false
+    
+    if az webapp show --name "$app_name" --resource-group "$resource_group" &> /dev/null; then
+        webapp_exists=true
+        echo "✓ Streamlit web app '$app_name' already exists. Checking status..."
+        webapp_state=$(az webapp show --name "$app_name" --resource-group "$resource_group" --query "state" -o tsv 2>/dev/null || echo "unknown")
+        webapp_url=$(az webapp show --name "$app_name" --resource-group "$resource_group" --query "defaultHostName" -o tsv 2>/dev/null || echo "N/A")
         
-        local plan_exit_code=$?
-        if [ $plan_exit_code -ne 0 ]; then
-            echo "✗ App Service Plan creation failed"
-            echo "Error: $plan_output"
-            echo ""
-            echo "Manual command to create App Service Plan:"
-            echo "  az appservice plan create \\"
-            echo "    --name $app_service_plan \\"
-            echo "    --resource-group $resource_group \\"
-            echo "    --location $location \\"
-            echo "    --is-linux \\"
-            echo "    --sku B2"
-            echo ""
-            read -p "Press Enter to continue with the deployment script (you can create the plan manually later), or Ctrl+C to abort..."
-            echo ""
-            echo "⚠️  Continuing script execution. App Service Plan creation will be skipped."
-            return 2
+        echo "  Current state: $webapp_state"
+        if [ "$webapp_url" != "N/A" ] && [ "$webapp_url" != "null" ]; then
+            echo "  URL: https://$webapp_url"
+            echo "  Checking Streamlit health..."
+            local health_check_output=$(curl -fsS --max-time 10 "https://$webapp_url/_stcore/health" 2>&1)
+            local health_check_exit=$?
+            
+            if [ $health_check_exit -eq 0 ]; then
+                echo "  ✓ Streamlit health check passed. App is healthy."
+                health_check_passed=true
+            else
+                echo "  ⚠️  Streamlit health check failed (exit code: $health_check_exit)"
+                echo "  Health check output: ${health_check_output:-timeout or connection refused}"
+                echo "  Reconfiguring existing app to fix issues..."
+                health_check_passed=false
+            fi
+        else
+            echo "  ⚠️  Streamlit URL not available. Reconfiguring existing app."
+            health_check_passed=false
         fi
-        echo "✓ App Service Plan created"
-    else
-        echo "✓ App Service Plan exists"
+        
+        # If health check passed, we still need to verify container registry is configured
+        # Don't skip - continue to verify/configure registry and settings
+        if [ "$health_check_passed" = true ]; then
+            echo ""
+            echo "✓ Streamlit web app is healthy. Verifying configuration..."
+        else
+            # If we get here, web app exists but health check failed - continue to reconfigure
+            echo ""
+            echo "Proceeding to reconfigure Streamlit web app..."
+        fi
     fi
     
-    # Create or update web app
-    echo ""
-    echo "Creating/updating Streamlit web app..."
-    local create_cmd=""
-    if az webapp show --name "$app_name" --resource-group "$resource_group" &> /dev/null; then
-        echo "Updating existing Streamlit web app..."
-        local webapp_output=$(az webapp config container set \
-            --name "$app_name" \
-            --resource-group "$resource_group" \
-            --docker-custom-image-name "$image_name" \
-            --docker-registry-server-url "$registry_url" \
-            --docker-registry-server-user "$registry_user" \
-            --docker-registry-server-password "$registry_pass" \
-            --output json 2>&1)
+    # Configure registry and settings whether web app is new or existing
+    if [ "$webapp_exists" = false ]; then
+        # App Service Plan is already verified before calling this function
+        # Proceed directly to creating the web app
         
-        create_cmd="az webapp config container set \\
-    --name $app_name \\
-    --resource-group $resource_group \\
-    --docker-custom-image-name $image_name \\
-    --docker-registry-server-url $registry_url \\
-    --docker-registry-server-user $registry_user \\
-    --docker-registry-server-password '$registry_pass'"
-    else
-        echo "Creating new Streamlit web app..."
+        # Create web app with container image (must specify for Linux container apps)
+        echo ""
+        echo "Creating Streamlit web app..."
+        local create_cmd="az webapp create --name $app_name --resource-group $resource_group --plan $app_service_plan --deployment-container-image-name $image_name"
+        
         local webapp_output=$(az webapp create \
             --name "$app_name" \
             --resource-group "$resource_group" \
             --plan "$app_service_plan" \
             --deployment-container-image-name "$image_name" \
-            --docker-registry-server-url "$registry_url" \
-            --docker-registry-server-user "$registry_user" \
-            --docker-registry-server-password "$registry_pass" \
             --output json 2>&1)
         
-        create_cmd="az webapp create \\
-    --name $app_name \\
-    --resource-group $resource_group \\
-    --plan $app_service_plan \\
-    --deployment-container-image-name $image_name \\
-    --docker-registry-server-url $registry_url \\
-    --docker-registry-server-user $registry_user \\
-    --docker-registry-server-password '$registry_pass'"
-    fi
-    
-    local webapp_exit_code=$?
-    
-    # Check for errors
-    local has_error=false
-    if echo "$webapp_output" | grep -qi "ERROR\|error\|InternalServerError" || [ $webapp_exit_code -ne 0 ]; then
-        has_error=true
-    fi
-    
-    if echo "$webapp_output" | jq -e '.error' &> /dev/null; then
-        has_error=true
-    fi
-    
-    if [ "$has_error" = true ]; then
-        echo "✗ Streamlit web app deployment failed"
-        echo ""
-        echo "Raw output:"
-        echo "$webapp_output"
-        echo ""
-        echo "Error details:"
-        local error_message=$(echo "$webapp_output" | jq -r '.error.message // .error // "Unknown error"' 2>/dev/null || echo "$webapp_output")
-        local error_code=$(echo "$webapp_output" | jq -r '.error.code // "Unknown"' 2>/dev/null || echo "Unknown")
-        local activity_id=$(echo "$webapp_output" | jq -r '.error.details[0].trackingId // "N/A"' 2>/dev/null || echo "N/A")
-        local correlation_id=$(echo "$webapp_output" | jq -r '.error.details[0].correlationId // "N/A"' 2>/dev/null || echo "N/A")
+        local webapp_exit_code=$?
         
-        echo "  Error Code: $error_code"
-        echo "  Error Message: $error_message"
-        if [ "$activity_id" != "N/A" ] || [ "$correlation_id" != "N/A" ]; then
-            echo "  Activity ID: $activity_id"
-            echo "  Correlation ID: $correlation_id"
+        # Check for errors (ignore warnings, only check for actual errors)
+        local has_error=false
+        local is_network_error=false
+        
+        # Check for network/connection errors
+        if echo "$webapp_output" | grep -qi "Connection.*reset\|Connection.*aborted\|Connection.*refused\|timeout"; then
+            is_network_error=true
+            has_error=true
         fi
-        echo ""
         
-        # Show diagnostic commands
-        echo "=========================================="
-        echo "Diagnostic Commands"
-        echo "=========================================="
-        echo ""
-        echo "To deploy the Streamlit app manually, run:"
-        echo ""
-        echo "$create_cmd"
-        echo ""
-        echo "Other diagnostic commands:"
-        echo ""
+        # Check if output contains actual error (not just warnings)
+        if echo "$webapp_output" | grep -qi "^ERROR:" && ! echo "$webapp_output" | jq -e '.name' &> /dev/null; then
+            has_error=true
+        fi
         
-        local registry_name="${registry_url#https://}"
-        registry_name="${registry_name%.azurecr.io}"
+        # Check for error JSON structure
+        if echo "$webapp_output" | jq -e '.error' &> /dev/null; then
+            has_error=true
+        fi
         
-        echo "1. Check resource group:"
-        echo "   az group show --name $resource_group --query '{name:name,location:location}' -o table"
-        echo ""
+        # Check if webapp was created successfully by looking for the name in JSON
+        if echo "$webapp_output" | jq -e '.name' &> /dev/null; then
+            local created_name=$(echo "$webapp_output" | jq -r '.name' 2>/dev/null)
+            if [ "$created_name" = "$app_name" ]; then
+                has_error=false
+                is_network_error=false
+            fi
+        fi
+        
+        if [ "$has_error" = true ]; then
+            if [ "$is_network_error" = true ]; then
+                echo "✗ Streamlit web app deployment failed due to network error"
+                echo ""
+                echo "This appears to be a transient network connection issue."
+                echo "The connection to Azure was reset during deployment."
+                echo ""
+                echo "Recommended actions:"
+                echo "  1. Wait a moment and run the deployment script again"
+                echo "  2. Check your internet connection"
+                echo "  3. Check Azure service status: https://status.azure.com/"
+                echo ""
+            else
+                echo "✗ Streamlit web app deployment failed"
+                echo ""
+                echo "Raw output:"
+                echo "$webapp_output"
+                echo ""
+                echo "Error details:"
+                local error_message=$(echo "$webapp_output" | jq -r '.error.message // .error // "Unknown error"' 2>/dev/null || echo "$webapp_output")
+                local error_code=$(echo "$webapp_output" | jq -r '.error.code // "Unknown"' 2>/dev/null || echo "Unknown")
+                local activity_id=$(echo "$webapp_output" | jq -r '.error.details[0].trackingId // "N/A"' 2>/dev/null || echo "N/A")
+                local correlation_id=$(echo "$webapp_output" | jq -r '.error.details[0].correlationId // "N/A"' 2>/dev/null || echo "N/A")
+                
+                echo "  Error Code: $error_code"
+                echo "  Error Message: $error_message"
+                if [ "$activity_id" != "N/A" ] || [ "$correlation_id" != "N/A" ]; then
+                    echo "  Activity ID: $activity_id"
+                    echo "  Correlation ID: $correlation_id"
+                fi
+                echo ""
+            fi
+            
+            # Show diagnostic commands
+            echo "=========================================="
+            echo "Diagnostic Commands"
+            echo "=========================================="
+            echo ""
+            echo "To deploy the Streamlit app manually, run:"
+            echo ""
+            echo "$create_cmd"
+            echo ""
+            echo "Then configure registry credentials:"
+            echo "  az webapp config container set --name $app_name --resource-group $resource_group --docker-custom-image-name $image_name --docker-registry-server-url $registry_url --docker-registry-server-user $registry_user --docker-registry-server-password '$registry_pass'"
+            echo ""
+            echo "Other diagnostic commands:"
+            echo ""
+            
+            local registry_name="${registry_url#https://}"
+            registry_name="${registry_name%.azurecr.io}"
+            
+            echo "1. Check resource group:"
+            echo "   az group show --name $resource_group --query '{name:name,location:location}' -o table"
+            echo ""
         
         echo "2. Verify image exists in registry:"
         echo "   az acr repository show-tags --name $registry_name --repository ${image_name%%:*} --output table"
@@ -878,13 +1054,90 @@ deploy_streamlit_app() {
         
         echo "=========================================="
         echo ""
-        read -p "Press Enter to continue with the deployment script (you can deploy the app manually later), or Ctrl+C to abort..."
+        echo "Press Enter to continue with the deployment script (you can deploy the app manually later), or Ctrl+C to abort..."
+        read -r
         echo ""
         echo "⚠️  Continuing script execution. Streamlit deployment will be skipped."
         return 2
     fi
     
-    echo "✓ Streamlit web app created/updated"
+    fi  # Close if [ "$webapp_exists" = false ]
+    
+    if [ "$webapp_exists" = false ]; then
+        echo "✓ Streamlit web app created"
+    else
+        echo "✓ Streamlit web app exists, reconfiguring"
+    fi
+    
+    # Verify credentials are not empty
+    if [ -z "$registry_user" ] || [ -z "$registry_pass" ]; then
+        echo "✗ Container registry credentials are missing!"
+        echo "  Username: ${registry_user:-empty}"
+        echo "  Password: ${registry_pass:+***set***}${registry_pass:-empty}"
+        echo ""
+        echo "Please ensure ACR admin user is enabled and credentials are available."
+        echo "Run: az acr update --name ${registry_url#https://} --admin-enabled true"
+        return 2
+    fi
+    
+    # Verify image exists in registry
+    echo ""
+    echo "Verifying image exists in registry..."
+    local registry_name="${registry_url#https://}"
+    registry_name="${registry_name%.azurecr.io}"
+    local image_repo="${image_name%%:*}"
+    local image_tag="${image_name##*:}"
+    
+    if ! az acr repository show-tags --name "$registry_name" --repository "$image_repo" --query "[?contains(@, '$image_tag')]" -o tsv &> /dev/null; then
+        echo "⚠️  Warning: Image tag '$image_tag' not found in repository '$image_repo'"
+        echo "Available tags:"
+        az acr repository show-tags --name "$registry_name" --repository "$image_repo" --output table 2>/dev/null || echo "  (unable to list tags)"
+        echo ""
+        echo "The image may not have been pushed successfully. Check build logs above."
+    else
+        echo "✓ Image found in registry"
+    fi
+    
+    # Configure container registry credentials (must be done after webapp creation)
+    echo ""
+    echo "Configuring container registry credentials..."
+    local registry_output=$(az webapp config container set \
+        --name "$app_name" \
+        --resource-group "$resource_group" \
+        --docker-custom-image-name "$image_name" \
+        --docker-registry-server-url "$registry_url" \
+        --docker-registry-server-user "$registry_user" \
+        --docker-registry-server-password "$registry_pass" \
+        --output json 2>&1)
+    
+    local registry_exit_code=$?
+    
+    if [ $registry_exit_code -ne 0 ]; then
+        echo "✗ Failed to configure container registry"
+        echo "Error: $registry_output"
+        echo ""
+        echo "Manual command to configure:"
+        echo "  az webapp config container set --name $app_name --resource-group $resource_group --docker-custom-image-name $image_name --docker-registry-server-url $registry_url --docker-registry-server-user $registry_user --docker-registry-server-password '$registry_pass'"
+        echo ""
+        echo "Verify credentials:"
+        echo "  az acr credential show --name $registry_name"
+        return 2
+    else
+        echo "✓ Container registry configured"
+        
+        # Verify configuration was applied
+        echo "Verifying container configuration..."
+        local configured_image=$(az webapp config container show \
+            --name "$app_name" \
+            --resource-group "$resource_group" \
+            --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value" -o tsv 2>/dev/null || echo "")
+        
+        if [ -n "$configured_image" ]; then
+            echo "✓ Container image verified: $configured_image"
+        else
+            echo "⚠️  Warning: Could not verify container image configuration"
+        fi
+    fi
     
     # Configure app settings
     echo ""
@@ -893,9 +1146,10 @@ deploy_streamlit_app() {
         --name "$app_name" \
         --resource-group "$resource_group" \
         --settings \
+            API_URL="${API_URL:-http://localhost:8000}" \
             AZURE_OPENAI_ENDPOINT="$AZURE_OPENAI_ENDPOINT" \
             AZURE_OPENAI_API_KEY="$AZURE_OPENAI_API_KEY" \
-            AZURE_OPENAI_DEPLOYMENT_NAME="${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-4}" \
+            AZURE_OPENAI_DEPLOYMENT_NAME="${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}" \
             SYNAPSE_SPARK_POOL_NAME="$SYNAPSE_SPARK_POOL_NAME" \
             SYNAPSE_WORKSPACE_NAME="$SYNAPSE_WORKSPACE_NAME" \
             AZURE_SUBSCRIPTION_ID="$AZURE_SUBSCRIPTION_ID" \
@@ -928,8 +1182,32 @@ deploy_streamlit_app() {
     fi
     
     echo ""
-    echo "✓ Streamlit web app deployed successfully"
-    return 0
+    echo "Checking Streamlit health after deployment..."
+    local final_webapp_url=$(az webapp show --name "$app_name" --resource-group "$resource_group" --query "defaultHostName" -o tsv 2>/dev/null || echo "N/A")
+    if [ -n "$final_webapp_url" ] && [ "$final_webapp_url" != "N/A" ] && [ "$final_webapp_url" != "null" ]; then
+        local health_ok=false
+        for attempt in 1 2 3; do
+            if curl -fsS --max-time 10 "https://$final_webapp_url/_stcore/health" &> /dev/null; then
+                health_ok=true
+                break
+            fi
+            echo "  Streamlit health check attempt $attempt failed. Retrying in 10s..."
+            sleep 10
+        done
+        
+        if [ "$health_ok" = true ]; then
+            echo "✓ Streamlit web app deployed successfully"
+            return 0
+        else
+            echo "⚠️  Streamlit web app is not healthy yet."
+            echo "  URL: https://$final_webapp_url"
+            echo "  You may need to wait a few minutes or check logs."
+            return 2
+        fi
+    else
+        echo "⚠️  Streamlit web app URL not available to verify health."
+        return 2
+    fi
 }
 
 # Deploy Streamlit to App Service
@@ -939,33 +1217,98 @@ if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo "Deploying Streamlit to Azure App Service"
     echo "=================================="
     
-    deploy_streamlit_app \
-        "$RESOURCE_GROUP" \
-        "$STREAMLIT_APP_NAME" \
-        "$APP_SERVICE_PLAN" \
-        "$STREAMLIT_FULL_IMAGE_NAME" \
-        "https://$CONTAINER_REGISTRY.azurecr.io" \
-        "$ACR_USERNAME" \
-        "$ACR_PASSWORD" \
-        "$LOCATION"
-    
-    streamlit_result=$?
-    
-    if [ $streamlit_result -eq 0 ]; then
-        echo ""
-        echo "✓ Streamlit web app deployed successfully"
-    elif [ $streamlit_result -eq 2 ]; then
-        echo ""
-        echo "⚠️  Streamlit deployment was skipped (user chose to continue)"
-        echo "You can deploy it manually using the command shown above."
+    # Create App Service Plan if it doesn't exist
+    echo ""
+    echo "Checking App Service Plan..."
+    if ! az appservice plan show --name "$APP_SERVICE_PLAN" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        echo "Creating App Service Plan '$APP_SERVICE_PLAN'..."
+        
+        plan_output=$(az appservice plan create \
+            --name "$APP_SERVICE_PLAN" \
+            --resource-group "$RESOURCE_GROUP" \
+            --location "$LOCATION" \
+            --is-linux \
+            --sku B1 \
+            --output json 2>&1)
+        
+        plan_exit_code=$?
+        
+        if [ $plan_exit_code -eq 0 ]; then
+            echo "✓ App Service Plan created"
+            echo "Waiting for plan to be ready..."
+            sleep 5
+        else
+            echo "✗ Failed to create App Service Plan"
+            echo ""
+            echo "Error output:"
+            echo "$plan_output"
+            echo ""
+            echo "=========================================="
+            echo "Manual Command to Create App Service Plan"
+            echo "=========================================="
+            echo ""
+            echo "az appservice plan create --name $APP_SERVICE_PLAN --resource-group $RESOURCE_GROUP --location $LOCATION --is-linux --sku B1"
+            echo ""
+            echo "=========================================="
+            echo ""
+            echo "Press Enter to continue (you can create the plan manually later), or Ctrl+C to abort..."
+            read -r
+            echo ""
+            echo "Skipping Streamlit deployment..."
+        fi
     else
+        echo "✓ App Service Plan already exists"
+    fi
+    
+    # Only proceed with deployment if plan exists
+    if az appservice plan show --name "$APP_SERVICE_PLAN" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        # Get API URL for Streamlit to connect to
+        API_URL="http://localhost:8000"  # Default
+        if [ "$IMAGE_BUILD_CHOICE" = "1" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
+            # Get API container FQDN if API was deployed
+            if az container show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+                API_FQDN=$(az container show --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --query "ipAddress.fqdn" -o tsv 2>/dev/null)
+                if [ -n "$API_FQDN" ] && [ "$API_FQDN" != "null" ]; then
+                    API_URL="http://$API_FQDN:8000"
+                    echo "✓ API URL for Streamlit: $API_URL"
+                fi
+            fi
+        fi
+        
+        # Export API_URL for use in deployment function
+        export API_URL
+        
         echo ""
-        echo "✗ Failed to deploy Streamlit web app"
-        echo ""
-        echo "The diagnostic commands and manual deployment command were shown above."
-        echo "Please review the error details and try deploying manually if needed."
-        echo ""
-        echo "Continuing with remaining deployment steps..."
+        echo "Calling deploy_streamlit_app function..."
+        deploy_streamlit_app \
+            "$RESOURCE_GROUP" \
+            "$STREAMLIT_APP_NAME" \
+            "$APP_SERVICE_PLAN" \
+            "$STREAMLIT_FULL_IMAGE_NAME" \
+            "https://$CONTAINER_REGISTRY.azurecr.io" \
+            "$ACR_USERNAME" \
+            "$ACR_PASSWORD" \
+            "$LOCATION"
+        
+        streamlit_result=$?
+        echo "deploy_streamlit_app returned exit code: $streamlit_result"
+        
+        if [ $streamlit_result -eq 0 ]; then
+            echo ""
+            echo "✓ Streamlit web app deployed successfully"
+        elif [ $streamlit_result -eq 2 ]; then
+            echo ""
+            echo "⚠️  Streamlit deployment was skipped (user chose to continue)"
+            echo "You can deploy it manually using the command shown above."
+        else
+            echo ""
+            echo "✗ Failed to deploy Streamlit web app"
+            echo ""
+            echo "The diagnostic commands and manual deployment command were shown above."
+            echo "Please review the error details and try deploying manually if needed."
+            echo ""
+            echo "Continuing with remaining deployment steps..."
+        fi
     fi
 fi
 
@@ -987,8 +1330,17 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
 fi
 
 if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
-    STREAMLIT_URL=$(az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" --query defaultHostName -o tsv)
-    echo "🌐 Streamlit Dashboard: https://$STREAMLIT_URL"
+    # Check if Streamlit web app exists before trying to get URL
+    if az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        STREAMLIT_URL=$(az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" --query defaultHostName -o tsv 2>/dev/null)
+        if [ -n "$STREAMLIT_URL" ] && [ "$STREAMLIT_URL" != "null" ]; then
+            echo "🌐 Streamlit Dashboard: https://$STREAMLIT_URL"
+        else
+            echo "⚠️  Streamlit web app deployment was skipped or failed"
+        fi
+    else
+        echo "⚠️  Streamlit web app was not deployed"
+    fi
     echo ""
 fi
 

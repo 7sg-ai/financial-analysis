@@ -5,7 +5,7 @@
 set -e
 
 # Configuration
-RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-financial-analysis-rg}"
+RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-financial-analysis}"
 OPENAI_RESOURCE_NAME="${AZURE_OPENAI_RESOURCE_NAME:-financial-analysis-openai}"
 
 echo "=================================="

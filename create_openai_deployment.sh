@@ -5,7 +5,7 @@
 set -e
 
 # Configuration
-RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-financial-analysis-rg}"
+RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-financial-analysis}"
 OPENAI_RESOURCE_NAME="${AZURE_OPENAI_RESOURCE_NAME:-financial-analysis-openai}"
 DEPLOYMENT_NAME="${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}"
 MODEL_NAME="${MODEL_NAME:-gpt-5.2-chat}"
@@ -96,7 +96,7 @@ else
     echo ""
     echo "Common issues:"
     echo "  - Model '$MODEL_NAME' may not be available in your region"
-    echo "  - You may need to request access to GPT-4"
+    echo "  - You may need to request access to GPT-5.2-chat"
     echo "  - Check quota limits in Azure Portal"
     exit 1
 fi

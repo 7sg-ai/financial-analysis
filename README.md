@@ -178,6 +178,69 @@ python3 download_data.py --years 2024 --service-types yellow --months 1 2 3
 - `--months 1 2 3` - Select specific months
 - `--verbose` - Enable detailed logging
 
+### Step 6: Cleanup and Cost Management
+
+When you're not using the application, you can reduce costs by stopping resources without deleting them. This allows you to quickly restart when needed.
+
+#### Stop Resources (Cost Reduction)
+
+Use the provided power-down script to stop running resources:
+
+```bash
+# Stop all resources in the resource group (interactive)
+./azure_power_down.sh -g rg-financial-analysis
+
+# Preview what would be stopped without actually stopping
+./azure_power_down.sh -g rg-financial-analysis --dry-run
+
+# Stop resources without confirmation prompts
+./azure_power_down.sh -g rg-financial-analysis --yes
+```
+
+**What gets stopped:**
+- Virtual Machines (deallocated)
+- Container Instances (stopped)
+- App Services / Web Apps (stopped)
+- AKS Clusters (stopped)
+- SQL Databases (paused if serverless)
+- Analysis Services (suspended)
+
+**What doesn't get stopped:**
+- Azure Container Registry (ACR) - minimal cost when idle
+- Azure Storage Accounts - pay for storage only
+- Azure Synapse Workspace - Spark pools auto-pause when idle
+- Azure OpenAI Service - pay per API call
+
+**To restart resources:**
+- Container Instances: They will restart automatically when accessed, or use `az container start`
+- Web Apps: Use `az webapp start` or access the URL (auto-starts)
+- VMs: Use `az vm start`
+- AKS: Use `az aks start`
+
+#### Complete Resource Deletion
+
+⚠️ **Warning**: This permanently deletes all resources and cannot be undone.
+
+```bash
+# Delete the entire resource group (deletes everything)
+az group delete --name rg-financial-analysis --yes --no-wait
+
+# Or delete individual resources:
+# Delete API container
+az container delete --name financial-analysis-api --resource-group rg-financial-analysis --yes
+
+# Delete Streamlit web app
+az webapp delete --name financial-analysis-streamlit --resource-group rg-financial-analysis
+
+# Delete App Service Plan
+az appservice plan delete --name financial-analysis-plan --resource-group rg-financial-analysis --yes
+
+# Delete Container Registry (if not needed)
+az acr delete --name financialanalysisacr --resource-group rg-financial-analysis --yes
+```
+
+**Note**: Storage accounts and Synapse workspaces may contain important data. Review these carefully before deletion.
+
 ## Accessing the Deployed Application
 
 ### Streamlit Dashboard (Recommended)

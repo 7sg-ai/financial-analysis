@@ -18,7 +18,7 @@ echo ""
 read -p "Enter choice (1-4): " DEPLOYMENT_CHOICE
 
 # Configuration
-RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-financial-analysis-rg}"
+RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-financial-analysis}"
 LOCATION="${AZURE_LOCATION:-eastus2}"
 CONTAINER_REGISTRY="${AZURE_CONTAINER_REGISTRY:-financialanalysisacr}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
@@ -30,7 +30,7 @@ USE_ACR_BUILD="${USE_ACR_BUILD:-false}"
 
 # Azure OpenAI Configuration
 OPENAI_RESOURCE_NAME="${AZURE_OPENAI_RESOURCE_NAME:-financial-analysis-openai}"
-OPENAI_DEPLOYMENT_NAME="${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-4}"
+OPENAI_DEPLOYMENT_NAME="${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}"
 
 # Azure Synapse Configuration
 SYNAPSE_WORKSPACE_NAME="${SYNAPSE_WORKSPACE_NAME:-financial-analysis-synapse}"
@@ -261,6 +261,9 @@ if ! az synapse workspace show --name "$SYNAPSE_WORKSPACE_NAME" --resource-group
         SYNAPSE_ADMIN_PASSWORD=$(openssl rand -base64 32)
     fi
     
+    # Create workspace without repository configuration
+    # Note: Repository configuration is optional and not needed for this deployment
+    # Using --only-show-errors to suppress repository-related warnings
     az synapse workspace create \
         --name "$SYNAPSE_WORKSPACE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
@@ -269,7 +272,7 @@ if ! az synapse workspace show --name "$SYNAPSE_WORKSPACE_NAME" --resource-group
         --sql-admin-login-user "$SYNAPSE_ADMIN_USER" \
         --sql-admin-login-password "$SYNAPSE_ADMIN_PASSWORD" \
         --location "$LOCATION" \
-        --repository-type None \
+        --only-show-errors \
         --output none
     echo "✓ Synapse workspace created"
     

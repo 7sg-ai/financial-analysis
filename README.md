@@ -6,7 +6,7 @@ Interactive financial analysis application using **Azure Synapse Spark** and **A
 
 This application provides an intelligent LLM-powered endpoint that:
 1. Accepts natural language questions about taxi/rideshare financial data
-2. Generates optimized Spark SQL queries using Azure OpenAI GPT-4
+2. Generates optimized Spark SQL queries using Azure OpenAI GPT-5.2-chat
 3. Executes queries on large-scale parquet datasets using Azure Synapse Spark
 4. Returns results as either tabular data or narrative explanations
 
@@ -14,7 +14,7 @@ This application provides an intelligent LLM-powered endpoint that:
 
 - 🤖 **Natural Language Queries**: Ask questions in plain English
 - ⚡ **Spark-Powered**: Handle large datasets efficiently with Azure Synapse Spark
-- 🧠 **LLM Query Generation**: Azure OpenAI GPT-4 generates optimized SQL
+- 🧠 **LLM Query Generation**: Azure OpenAI GPT-5.2-chat generates optimized SQL
 - 📊 **Multiple Output Formats**: JSON, tables, narratives, Markdown, HTML
 - 🔍 **Smart Validation**: Automatic query validation and safety checks
 - 📈 **Financial Metrics**: Revenue, tips, driver pay, trip analysis
@@ -32,7 +32,7 @@ This application provides an intelligent LLM-powered endpoint that:
          │
          ▼
 ┌─────────────────────────┐
-│  Azure OpenAI (GPT-4)   │  ← Generate Spark SQL Query
+│  Azure OpenAI (GPT-5.2-chat)   │  ← Generate Spark SQL Query
 └────────┬────────────────┘
          │
          ▼
@@ -104,10 +104,10 @@ cd financial-analysis
 **Set up Azure Container Registry:**
 ```bash
 # Create resource group
-az group create --name financial-analysis-rg --location eastus2
+az group create --name rg-financial-analysis --location eastus2
 
 # Create container registry
-az acr create --resource-group financial-analysis-rg \
+az acr create --resource-group rg-financial-analysis \
   --name financialanalysisacr --sku Basic --admin-enabled true
 ```
 
@@ -116,7 +116,7 @@ az acr create --resource-group financial-analysis-rg \
 # Create Azure OpenAI resource
 az cognitiveservices account create \
   --name financial-analysis-openai \
-  --resource-group financial-analysis-rg \
+  --resource-group rg-financial-analysis \
   --location eastus2 \
   --kind OpenAI \
   --sku S0
@@ -148,7 +148,7 @@ Set the following in your Azure App Service or Container Instance:
 ```bash
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_API_KEY=your-actual-api-key-here
-AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5.2-chat
 ```
 
 **Required Azure Synapse Spark configuration:**
@@ -397,7 +397,7 @@ The application includes the `azure-synapse-spark` package. The `create_spark_se
    - Required for all data processing operations
 
 5. **Azure OpenAI Service**
-   - GPT-4 deployment for query generation
+   - GPT-5.2-chat deployment for query generation
    - Configure appropriate rate limits
 
 ### Data Storage Strategy
@@ -474,7 +474,7 @@ All configuration is managed through environment variables or `.env` file:
 |----------|----------|-------------|
 | `AZURE_OPENAI_ENDPOINT` | Yes | Azure OpenAI service endpoint |
 | `AZURE_OPENAI_API_KEY` | Yes | Azure OpenAI API key |
-| `AZURE_OPENAI_DEPLOYMENT_NAME` | No | Model deployment name (default: gpt-4) |
+| `AZURE_OPENAI_DEPLOYMENT_NAME` | No | Model deployment name (default: gpt-5.2-chat) |
 | `DATA_PATH` | No | Path to data directory (default: ./src_data or Azure Data Lake path) |
 | `API_PORT` | No | API server port (default: 8000) |
 | `SYNAPSE_SPARK_POOL_NAME` | Yes | Synapse Spark pool name |
@@ -536,7 +536,7 @@ Adjust in `llm_query_generator.py`:
 
 1. Verify endpoint URL format: `https://your-resource.openai.azure.com/`
 2. Ensure API key is valid and not expired
-3. Check you have access to the GPT-4 deployment
+3. Check you have access to the GPT-5.2-chat deployment
 4. Verify the deployment name matches your configuration
 
 ### Spark/Memory Issues

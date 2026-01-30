@@ -8,7 +8,7 @@
 #   API_CONTAINER_NAME=my-api STREAMLIT_APP_NAME=my-app ./update_streamlit_api_url.sh
 #
 # Environment Variables:
-#   AZURE_RESOURCE_GROUP      - Azure resource group name (default: financial-analysis-rg)
+#   AZURE_RESOURCE_GROUP      - Azure resource group name (default: rg-financial-analysis)
 #   API_CONTAINER_NAME        - API container name (default: financial-analysis-api)
 #   STREAMLIT_APP_NAME        - Streamlit web app name (default: financial-analysis-streamlit)
 #   API_PORT                  - API port (default: 8000)
@@ -29,7 +29,7 @@ if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
     echo "  -h, --help     Show this help message"
     echo ""
     echo "Environment Variables:"
-    echo "  AZURE_RESOURCE_GROUP      Azure resource group name (default: financial-analysis-rg)"
+    echo "  AZURE_RESOURCE_GROUP      Azure resource group name (default: rg-financial-analysis)"
     echo "  API_CONTAINER_NAME        API container name (default: financial-analysis-api)"
     echo "  STREAMLIT_APP_NAME        Streamlit web app name (default: financial-analysis-streamlit)"
     echo "  API_PORT                  API port (default: 8000)"
@@ -42,7 +42,7 @@ if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
 fi
 
 # Configuration - can be overridden via environment variables
-RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-financial-analysis-rg}"
+RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-financial-analysis}"
 API_CONTAINER_NAME="${API_CONTAINER_NAME:-financial-analysis-api}"
 STREAMLIT_APP_NAME="${STREAMLIT_APP_NAME:-financial-analysis-streamlit}"
 API_PORT="${API_PORT:-8000}"

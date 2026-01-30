@@ -7,7 +7,7 @@ echo "Financial Analysis Streamlit - Azure Deployment"
 echo "=================================="
 
 # Configuration
-RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-financial-analysis-rg}"
+RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-financial-analysis}"
 LOCATION="${AZURE_LOCATION:-eastus}"
 APP_SERVICE_PLAN="${APP_SERVICE_PLAN:-financial-analysis-plan}"
 APP_NAME="${APP_NAME:-financial-analysis-streamlit}"

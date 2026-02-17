@@ -14,8 +14,14 @@ echo "1) API only (FastAPI)"
 echo "2) Streamlit UI only"
 echo "3) Both API and Streamlit UI"
 echo "4) Update images only (rebuild and update existing containers)"
+echo "5) Assign Synapse role to managed identity only (no deploy)"
 echo ""
-read -p "Enter choice (1-4): " DEPLOYMENT_CHOICE
+read -p "Enter choice (1-5): " DEPLOYMENT_CHOICE
+
+if [[ ! "$DEPLOYMENT_CHOICE" =~ ^[1-5]$ ]]; then
+    echo "Invalid choice. Please enter 1, 2, 3, 4, or 5."
+    exit 1
+fi
 
 # Configuration
 RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-financial-analysis}"
@@ -39,6 +45,12 @@ SYNAPSE_STORAGE_ACCOUNT="${SYNAPSE_STORAGE_ACCOUNT:-financialanalysissynapse}"
 SYNAPSE_FILE_SYSTEM="${SYNAPSE_FILE_SYSTEM:-data}"
 SYNAPSE_ADMIN_USER="${SYNAPSE_ADMIN_USER:-sqladmin}"
 SYNAPSE_ADMIN_PASSWORD="${SYNAPSE_ADMIN_PASSWORD:-$(openssl rand -base64 32)}"
+
+# Synapse auth: user-assigned managed identity only
+API_IDENTITY_NAME="${API_IDENTITY_NAME:-financial-analysis-api-identity}"
+# Synapse role for managed identity. Must include useCompute for Livy/Spark sessions.
+# Synapse Administrator and Synapse Contributor both grant useCompute. Some workspaces lack "Synapse Apache Spark Administrator".
+SYNAPSE_ROLE="${SYNAPSE_ROLE:-Synapse Administrator}"
 
 # Set deployment-specific variables
 if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ] || [ "$DEPLOYMENT_CHOICE" = "4" ]; then
@@ -96,6 +108,10 @@ echo "  Deployment Choice: $DEPLOYMENT_CHOICE"
 echo "  Build Method: $([ "$USE_ACR_BUILD" = "true" ] && echo "Azure Container Registry Build" || echo "Local Docker Build (Linux/AMD64)")"
 if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo "  API Image: $API_IMAGE_NAME:$IMAGE_TAG"
+    echo "  Synapse Role (for managed identity): $SYNAPSE_ROLE"
+fi
+if [ "$DEPLOYMENT_CHOICE" = "5" ]; then
+    echo "  Synapse Role: $SYNAPSE_ROLE"
 fi
 if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo "  Streamlit Image: $STREAMLIT_IMAGE_NAME:$IMAGE_TAG"
@@ -111,8 +127,8 @@ if ! command -v az &> /dev/null; then
     exit 1
 fi
 
-# Check Docker (required for local builds)
-if ! command -v docker &> /dev/null; then
+# Check Docker (required for local builds; skip for option 5)
+if [ "$DEPLOYMENT_CHOICE" != "5" ] && ! command -v docker &> /dev/null; then
     echo "Error: Docker not found. Please install Docker first."
     echo ""
     echo "Installation options:"
@@ -126,8 +142,8 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# Check if Docker daemon is running
-if ! docker info &> /dev/null; then
+# Check if Docker daemon is running (skip for option 5)
+if [ "$DEPLOYMENT_CHOICE" != "5" ] && ! docker info &> /dev/null; then
     echo "Error: Docker is installed but the daemon is not running."
     echo ""
     echo "Please start Docker Desktop (macOS/Windows) or the Docker service (Linux):"
@@ -152,8 +168,8 @@ az group create \
 
 echo "✓ Resource group ready"
 
-# Skip Azure resource creation for image update only
-if [ "$DEPLOYMENT_CHOICE" != "4" ]; then
+# Skip Azure resource creation for image update only or role-assign-only
+if [ "$DEPLOYMENT_CHOICE" != "4" ] && [ "$DEPLOYMENT_CHOICE" != "5" ]; then
     # Create Azure OpenAI service if it doesn't exist
     echo ""
     echo "Checking Azure OpenAI service..."
@@ -323,6 +339,107 @@ else
     echo "✓ Container registry exists"
 fi
 fi  # End of skip resource creation for option 4
+
+# Assign Synapse + Storage RBAC to managed identity (used by option 5 and by option 1/3 after container verification)
+assign_synapse_and_storage_rbac() {
+    local principal_id=$1
+    if [ -z "$principal_id" ]; then
+        echo "  (No principal ID; skipping RBAC)"
+        return 1
+    fi
+    echo ""
+    echo "Assigning Synapse and Storage RBAC (same as option 5)..."
+    SYNAPSE_ROLES_TO_TRY=("$SYNAPSE_ROLE" "Synapse Administrator" "Synapse Contributor" "Synapse Compute Operator")
+    SYNAPSE_ASSIGNED=false
+    for ROLE in "${SYNAPSE_ROLES_TO_TRY[@]}"; do
+        [ -z "$ROLE" ] && continue
+        if az synapse role assignment create --workspace-name "$SYNAPSE_WORKSPACE_NAME" --role "$ROLE" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal 2>/dev/null; then
+            echo "  ✓ Synapse role '$ROLE' assigned"
+            SYNAPSE_ASSIGNED=true
+            break
+        fi
+    done
+    if [ "$SYNAPSE_ASSIGNED" = false ]; then
+        echo "  ⚠️  Synapse role may already be assigned. If 403 useCompute persists, run option 5."
+    fi
+    echo "  Assigning Storage Blob Data Contributor..."
+    if az storage account show --name "$SYNAPSE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        if az role assignment create --role "Storage Blob Data Contributor" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Storage/storageAccounts/$SYNAPSE_STORAGE_ACCOUNT" 2>/dev/null; then
+            echo "  ✓ Storage Blob Data Contributor assigned"
+        else
+            echo "  ⚠️  May already be assigned."
+        fi
+    fi
+}
+
+# Option 5: Assign Synapse role to managed identity only (no deploy)
+if [ "$DEPLOYMENT_CHOICE" = "5" ]; then
+    echo ""
+    echo "=================================="
+    echo "Assign Synapse Role to Managed Identity"
+    echo "=================================="
+    echo ""
+
+    # Check 1: Synapse workspace exists
+    echo "Checking prerequisites..."
+    if ! az synapse workspace show --name "$SYNAPSE_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        echo "✗ Synapse workspace '$SYNAPSE_WORKSPACE_NAME' not found. Deploy with option 1 or 3 first."
+        exit 1
+    fi
+    echo "  ✓ Synapse workspace exists: $SYNAPSE_WORKSPACE_NAME"
+
+    # Check 2: Spark pool exists
+    if ! az synapse spark pool show --workspace-name "$SYNAPSE_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" --name "$SYNAPSE_SPARK_POOL_NAME" &> /dev/null; then
+        echo "✗ Spark pool '$SYNAPSE_SPARK_POOL_NAME' not found. Deploy with option 1 or 3 first to create the pool."
+        exit 1
+    fi
+    echo "  ✓ Spark pool exists: $SYNAPSE_SPARK_POOL_NAME"
+
+    # Check 3: Create or verify managed identity
+    echo ""
+    echo "Ensuring user-assigned managed identity exists..."
+    if ! az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        az identity create --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --output none
+        echo "  ✓ Created user-assigned identity: $API_IDENTITY_NAME"
+    else
+        echo "  ✓ Using existing identity: $API_IDENTITY_NAME"
+    fi
+
+    API_IDENTITY_PRINCIPAL_ID=$(az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query principalId -o tsv)
+    API_IDENTITY_CLIENT_ID=$(az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query clientId -o tsv)
+    echo "  Principal ID: $API_IDENTITY_PRINCIPAL_ID"
+    echo "  Client ID: $API_IDENTITY_CLIENT_ID"
+    echo "  (If you see a 403 with a different principal ID, the container may be using a different identity.)"
+    echo ""
+
+    # Check 4: List existing Synapse role assignments for this identity
+    echo "Current Synapse role assignments for this identity:"
+    EXISTING_ROLES=$(az synapse role assignment list --workspace-name "$SYNAPSE_WORKSPACE_NAME" --query "[?principalId=='$API_IDENTITY_PRINCIPAL_ID'].roleName" -o tsv 2>/dev/null || true)
+    if [ -n "$EXISTING_ROLES" ]; then
+        echo "$EXISTING_ROLES" | tr '\t' '\n' | sed 's/^/  - /'
+    else
+        echo "  (none)"
+    fi
+    echo ""
+
+    if ! assign_synapse_and_storage_rbac "$API_IDENTITY_PRINCIPAL_ID"; then
+        echo "  Skipped (no principal ID)"
+    fi
+    if ! az synapse role assignment list --workspace-name "$SYNAPSE_WORKSPACE_NAME" --query "[?principalId=='$API_IDENTITY_PRINCIPAL_ID']" -o tsv 2>/dev/null | grep -q .; then
+        echo ""
+        echo "⚠️  Could not assign any Synapse role. If the API still cannot access Synapse (403 useCompute):"
+        echo "   1. Verify in Synapse Studio: Manage -> Access control -> Add role assignment"
+        echo "   2. Add '$API_IDENTITY_NAME' (principal $API_IDENTITY_PRINCIPAL_ID) with 'Synapse Administrator' or 'Synapse Contributor'"
+        echo "   3. Wait 5-10 minutes for propagation"
+        echo ""
+        exit 1
+    fi
+
+    echo ""
+    echo "Done. The managed identity is ready for the API container to use."
+    echo "Note: Synapse role changes can take 5-10 minutes to propagate."
+    exit 0
+fi
 
 # Build Docker images
 echo ""
@@ -626,7 +743,7 @@ create_container() {
         local container_state=$(az container show --resource-group "$resource_group" --name "$container_name" --query "containers[0].instanceView.currentState.state" -o tsv 2>/dev/null || echo "unknown")
         local container_ip=$(az container show --resource-group "$resource_group" --name "$container_name" --query "ipAddress.ip" -o tsv 2>/dev/null || echo "N/A")
         local container_fqdn=$(az container show --resource-group "$resource_group" --name "$container_name" --query "ipAddress.fqdn" -o tsv 2>/dev/null || echo "N/A")
-        
+
         echo "  Current state: $container_state"
         if [ "$container_ip" != "N/A" ]; then
             echo "  IP Address: $container_ip"
@@ -634,6 +751,21 @@ create_container() {
         if [ "$container_fqdn" != "N/A" ]; then
             echo "  FQDN: $container_fqdn"
         fi
+
+        # If container is stopped, start it
+        if [ "$(echo "$container_state" | tr '[:upper:]' '[:lower:]')" = "stopped" ]; then
+            echo ""
+            echo "  Container is stopped. Starting it..."
+            if az container start --resource-group "$resource_group" --name "$container_name" 2>/dev/null; then
+                echo "  ✓ Container start initiated. Waiting for Running state..."
+                sleep 10
+                local new_state=$(az container show --resource-group "$resource_group" --name "$container_name" --query "containers[0].instanceView.currentState.state" -o tsv 2>/dev/null || echo "unknown")
+                echo "  New state: $new_state"
+            else
+                echo "  ⚠️  Could not start container. You may need to delete and recreate it."
+            fi
+        fi
+
         echo ""
         echo "Skipping container creation. Using existing container."
         return 0
@@ -651,34 +783,77 @@ create_container() {
     echo "  OS Type: Linux"
     echo ""
     
+    # Build DATA_PATH and storage env vars for Spark to read from Azure Storage
+    local data_path="abfss://${SYNAPSE_FILE_SYSTEM}@${SYNAPSE_STORAGE_ACCOUNT}.dfs.core.windows.net/taxi-data/"
+    local storage_key
+    storage_key=$(az storage account keys list --account-name "$SYNAPSE_STORAGE_ACCOUNT" --resource-group "$resource_group" --query '[0].value' -o tsv 2>/dev/null || echo "")
+
+    # Build env vars for container
+    local env_vars="AZURE_OPENAI_ENDPOINT=\"$AZURE_OPENAI_ENDPOINT\" AZURE_OPENAI_API_KEY=\"$AZURE_OPENAI_API_KEY\" AZURE_OPENAI_DEPLOYMENT_NAME=\"${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}\" SYNAPSE_SPARK_POOL_NAME=\"$SYNAPSE_SPARK_POOL_NAME\" SYNAPSE_WORKSPACE_NAME=\"$SYNAPSE_WORKSPACE_NAME\" AZURE_SUBSCRIPTION_ID=\"$AZURE_SUBSCRIPTION_ID\" AZURE_RESOURCE_GROUP=\"$AZURE_RESOURCE_GROUP\" DATA_PATH=\"$data_path\" AZURE_STORAGE_ACCOUNT_NAME=\"$SYNAPSE_STORAGE_ACCOUNT\" AZURE_STORAGE_CONTAINER=\"$SYNAPSE_FILE_SYSTEM\" API_PORT=8000"
+    if [ -n "$storage_key" ]; then
+        env_vars="$env_vars AZURE_STORAGE_ACCOUNT_KEY=\"$storage_key\""
+    fi
+    if [ -n "${API_IDENTITY_CLIENT_ID:-}" ]; then
+        env_vars="$env_vars AZURE_CLIENT_ID=\"$API_IDENTITY_CLIENT_ID\""
+        echo "  Synapse auth: User-assigned managed identity ($API_IDENTITY_NAME)"
+    else
+        echo "  Synapse auth: System-assigned managed identity"
+    fi
+
+    # Build assign-identity: user-assigned when API_IDENTITY_ID set, else system
+    local assign_identity_arg=""
+    if [ -n "${API_IDENTITY_ID:-}" ]; then
+        assign_identity_arg="$API_IDENTITY_ID"
+    else
+        assign_identity_arg="[system]"
+    fi
+
     # Build the command for display (single-line format for easy copy-paste)
-    local create_cmd="az container create --resource-group $resource_group --name $container_name --image $image --registry-login-server $registry_server --registry-username $registry_user --registry-password '$registry_pass' --dns-name-label $dns_label --os-type Linux --ports 8000 --cpu 4 --memory 8 --environment-variables AZURE_OPENAI_ENDPOINT=\"$AZURE_OPENAI_ENDPOINT\" AZURE_OPENAI_API_KEY=\"$AZURE_OPENAI_API_KEY\" AZURE_OPENAI_DEPLOYMENT_NAME=\"${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}\" SYNAPSE_SPARK_POOL_NAME=\"$SYNAPSE_SPARK_POOL_NAME\" SYNAPSE_WORKSPACE_NAME=\"$SYNAPSE_WORKSPACE_NAME\" AZURE_SUBSCRIPTION_ID=\"$AZURE_SUBSCRIPTION_ID\" AZURE_RESOURCE_GROUP=\"$AZURE_RESOURCE_GROUP\" API_PORT=8000"
-    
+    local identity_param=""
+    [ -n "$assign_identity_arg" ] && identity_param="--assign-identity $assign_identity_arg"
+    local create_cmd="az container create --resource-group $resource_group --name $container_name --image $image --registry-login-server $registry_server --registry-username $registry_user --registry-password '$registry_pass' --dns-name-label $dns_label --os-type Linux --ports 8000 --cpu 4 --memory 8 $identity_param --environment-variables $env_vars"
+    # Build base az container create args (identity and env vars)
+    local create_args=(
+        --resource-group "$resource_group"
+        --name "$container_name"
+        --image "$image"
+        --registry-login-server "$registry_server"
+        --registry-username "$registry_user"
+        --registry-password "$registry_pass"
+        --dns-name-label "$dns_label"
+        --os-type Linux
+        --ports 8000
+        --cpu 4
+        --memory 8
+        --environment-variables
+            "AZURE_OPENAI_ENDPOINT=$AZURE_OPENAI_ENDPOINT"
+            "AZURE_OPENAI_API_KEY=$AZURE_OPENAI_API_KEY"
+            "AZURE_OPENAI_DEPLOYMENT_NAME=${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}"
+            "SYNAPSE_SPARK_POOL_NAME=$SYNAPSE_SPARK_POOL_NAME"
+            "SYNAPSE_WORKSPACE_NAME=$SYNAPSE_WORKSPACE_NAME"
+            "AZURE_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID"
+            "AZURE_RESOURCE_GROUP=$AZURE_RESOURCE_GROUP"
+            "DATA_PATH=$data_path"
+            "AZURE_STORAGE_ACCOUNT_NAME=$SYNAPSE_STORAGE_ACCOUNT"
+            "AZURE_STORAGE_CONTAINER=$SYNAPSE_FILE_SYSTEM"
+            "API_PORT=8000"
+    )
+    if [ -n "$storage_key" ]; then
+        create_args+=( "AZURE_STORAGE_ACCOUNT_KEY=$storage_key" )
+    fi
+    if [ -n "${API_IDENTITY_CLIENT_ID:-}" ]; then
+        create_args+=( "AZURE_CLIENT_ID=$API_IDENTITY_CLIENT_ID" )
+    fi
+    if [ -n "$assign_identity_arg" ]; then
+        create_args+=( --assign-identity "$assign_identity_arg" )
+    fi
+
     # Create container with verbose output for debugging
-    local create_output=$(az container create \
-        --resource-group "$resource_group" \
-        --name "$container_name" \
-        --image "$image" \
-        --registry-login-server "$registry_server" \
-        --registry-username "$registry_user" \
-        --registry-password "$registry_pass" \
-        --dns-name-label "$dns_label" \
-        --os-type Linux \
-        --ports 8000 \
-        --cpu 4 \
-        --memory 8 \
-        --environment-variables \
-            AZURE_OPENAI_ENDPOINT="$AZURE_OPENAI_ENDPOINT" \
-            AZURE_OPENAI_API_KEY="$AZURE_OPENAI_API_KEY" \
-            AZURE_OPENAI_DEPLOYMENT_NAME="${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}" \
-            SYNAPSE_SPARK_POOL_NAME="$SYNAPSE_SPARK_POOL_NAME" \
-            SYNAPSE_WORKSPACE_NAME="$SYNAPSE_WORKSPACE_NAME" \
-            AZURE_SUBSCRIPTION_ID="$AZURE_SUBSCRIPTION_ID" \
-            AZURE_RESOURCE_GROUP="$AZURE_RESOURCE_GROUP" \
-            API_PORT=8000 \
-        --output json 2>&1)
-    
+    set +e
+    local create_output
+    create_output=$(az container create "${create_args[@]}" --output json 2>&1)
     local create_exit_code=$?
+    set -e
     
     # Check for errors in output (Azure CLI may return 0 even with errors)
     local has_error=false
@@ -773,6 +948,21 @@ create_container() {
         echo "✓ Container verified in Azure"
         local container_state=$(az container show --resource-group "$resource_group" --name "$container_name" --query "containers[0].instanceView.currentState.state" -o tsv 2>/dev/null || echo "unknown")
         echo "  Container state: $container_state"
+
+        # Role already assigned for user-assigned identity. Only needed for system-assigned fallback.
+        if [ "$assign_identity_arg" = "[system]" ]; then
+            echo ""
+            echo "Assigning Synapse role to container system-assigned identity..."
+            local principal_id
+            principal_id=$(az container show --resource-group "$resource_group" --name "$container_name" --query "identity.principalId" -o tsv 2>/dev/null || echo "")
+            if [ -n "$principal_id" ] && [ "$principal_id" != "None" ]; then
+                if az synapse role assignment create --workspace-name "$SYNAPSE_WORKSPACE_NAME" --role "$SYNAPSE_ROLE" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal 2>/dev/null; then
+                    echo "  ✓ Granted '$SYNAPSE_ROLE' to container identity"
+                else
+                    echo "  ⚠️  Could not assign Synapse role (run manually if needed)"
+                fi
+            fi
+        fi
         return 0
     else
         echo "⚠️  Container creation reported success but container not found"
@@ -805,7 +995,22 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo "=================================="
     echo "Deploying API to Azure Container Instances"
     echo "=================================="
-    
+
+    # Create or use user-assigned managed identity for API
+    API_IDENTITY_ID=""
+    API_IDENTITY_CLIENT_ID=""
+    echo ""
+    echo "Ensuring user-assigned managed identity exists..."
+    if ! az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        az identity create --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --output none
+        echo "  ✓ Created user-assigned identity: $API_IDENTITY_NAME"
+    else
+        echo "  ✓ Using existing identity: $API_IDENTITY_NAME"
+    fi
+    API_IDENTITY_ID=$(az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv)
+    API_IDENTITY_CLIENT_ID=$(az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query clientId -o tsv)
+    API_IDENTITY_PRINCIPAL_ID=$(az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query principalId -o tsv)
+
     # Pre-deployment checks
     echo ""
     echo "Pre-deployment checks:"
@@ -845,7 +1050,10 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     if [ $container_result -eq 0 ]; then
         echo ""
         echo "✓ API container deployed successfully"
-        
+
+        # Assign full RBAC (same as option 5) after container verification
+        assign_synapse_and_storage_rbac "$API_IDENTITY_PRINCIPAL_ID"
+
         # Get container details
         echo ""
         echo "Container details:"
@@ -854,6 +1062,52 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
             --name "$API_CONTAINER_NAME" \
             --query "{name:name,state:containers[0].instanceView.currentState.state,ip:ipAddress.ip,fqdn:ipAddress.fqdn}" \
             --output table
+
+        # Step 2: Populate Azure Storage (optional)
+        echo ""
+        echo "=================================="
+        echo "Populate Azure Storage with taxi data"
+        echo "=================================="
+        echo "The API reads from Azure Storage (abfss). Populate it with NYC taxi parquet files."
+        echo ""
+        read -p "Populate storage now? Downloads from NYC TLC and uploads (may take 5-15 min) [y/N]: " POPULATE_CHOICE
+        if [ "$POPULATE_CHOICE" = "y" ] || [ "$POPULATE_CHOICE" = "Y" ]; then
+            STORAGE_KEY_FOR_UPLOAD=$(az storage account keys list --account-name "$SYNAPSE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query '[0].value' -o tsv 2>/dev/null || echo "")
+            if [ -n "$STORAGE_KEY_FOR_UPLOAD" ]; then
+                SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+                if [ -f "$SCRIPT_DIR/download_data.py" ]; then
+                    echo "Running: python3 download_data.py --years 2024 --service-types yellow green --months 1 2 3 --upload"
+                    if (cd "$SCRIPT_DIR" && AZURE_STORAGE_ACCOUNT_NAME="$SYNAPSE_STORAGE_ACCOUNT" AZURE_STORAGE_ACCOUNT_KEY="$STORAGE_KEY_FOR_UPLOAD" AZURE_STORAGE_CONTAINER="$SYNAPSE_FILE_SYSTEM" python3 download_data.py --years 2024 --service-types yellow green --months 1 2 3 --upload 2>&1); then
+                        echo "✓ Storage populated successfully"
+                    else
+                        echo "⚠️  Upload had errors - check logs. You can retry with: python3 download_data.py --years 2024 --upload"
+                    fi
+                else
+                    echo "⚠️  download_data.py not found. Run from project dir: python3 download_data.py --years 2024 --upload"
+                fi
+            else
+                echo "⚠️  Could not get storage key. Run manually: AZURE_STORAGE_ACCOUNT_NAME=$SYNAPSE_STORAGE_ACCOUNT AZURE_STORAGE_ACCOUNT_KEY=<key> python3 download_data.py --years 2024 --upload"
+            fi
+        else
+            echo "Skipped. Run later: python3 download_data.py --years 2024 --upload"
+        fi
+
+        # Step 3: Test API health
+        echo ""
+        echo "=================================="
+        echo "Testing API"
+        echo "=================================="
+        API_FQDN=$(az container show --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --query "ipAddress.fqdn" -o tsv 2>/dev/null || echo "")
+        if [ -n "$API_FQDN" ] && [ "$API_FQDN" != "null" ]; then
+            echo "Waiting 90s for container and Synapse session to initialize..."
+            sleep 90
+            if curl -sf --max-time 15 "http://${API_FQDN}:8000/health" > /dev/null 2>&1; then
+                echo "✓ API health check passed: http://${API_FQDN}:8000/health"
+            else
+                echo "⚠️  Health check failed or timed out. Container may still be starting."
+                echo "   Try: curl http://${API_FQDN}:8000/health"
+            fi
+        fi
     elif [ $container_result -eq 2 ]; then
         echo ""
         echo "⚠️  API container deployment was skipped (user chose to continue)"
@@ -1334,12 +1588,13 @@ echo "=================================="
 echo ""
 
 if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
-    API_FQDN=$(az container show \
-        --resource-group "$RESOURCE_GROUP" \
-        --name "$API_CONTAINER_NAME" \
-        --query ipAddress.fqdn -o tsv)
-    echo "🚀 API URL: http://$API_FQDN:8000"
-    echo "📚 API Docs: http://$API_FQDN:8000/docs"
+    API_FQDN=$(az container show --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --query ipAddress.fqdn -o tsv 2>/dev/null || echo "")
+    if [ -n "$API_FQDN" ] && [ "$API_FQDN" != "null" ]; then
+        echo "🚀 API URL: http://$API_FQDN:8000"
+        echo "📚 API Docs: http://$API_FQDN:8000/docs"
+    else
+        echo "⚠️  API container not found - use manual deploy command below if deployment failed"
+    fi
     echo ""
 fi
 
@@ -1375,16 +1630,41 @@ echo "🔧 Management Commands:"
 if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo "  API logs: az container logs --resource-group $RESOURCE_GROUP --name $API_CONTAINER_NAME"
     echo "  Delete API: az container delete --resource-group $RESOURCE_GROUP --name $API_CONTAINER_NAME"
+    echo ""
+    echo "  Manual deploy (if needed):"
+    DATA_PATH_VAL="abfss://${SYNAPSE_FILE_SYSTEM}@${SYNAPSE_STORAGE_ACCOUNT}.dfs.core.windows.net/taxi-data/"
+    STORAGE_KEY_VAL=$(az storage account keys list --account-name "$SYNAPSE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query '[0].value' -o tsv 2>/dev/null || echo "")
+    API_IMAGE_FULL="${CONTAINER_REGISTRY}.azurecr.io/${API_IMAGE_NAME}:${IMAGE_TAG}"
+    IDENTITY_ID_FOR_MANUAL=""
+    if [ -n "${API_IDENTITY_ID:-}" ]; then
+        IDENTITY_ID_FOR_MANUAL="$API_IDENTITY_ID"
+    else
+        IDENTITY_ID_FOR_MANUAL="[system]"
+    fi
+    MANUAL_CMD="az container create --resource-group $RESOURCE_GROUP --name $API_CONTAINER_NAME --image $API_IMAGE_FULL --registry-login-server $CONTAINER_REGISTRY.azurecr.io --registry-username $ACR_USERNAME --registry-password '$ACR_PASSWORD' --dns-name-label $API_CONTAINER_NAME --os-type Linux --ports 8000 --cpu 4 --memory 8 --assign-identity $IDENTITY_ID_FOR_MANUAL --environment-variables AZURE_OPENAI_ENDPOINT=\"$AZURE_OPENAI_ENDPOINT\" AZURE_OPENAI_API_KEY=\"$AZURE_OPENAI_API_KEY\" AZURE_OPENAI_DEPLOYMENT_NAME=\"${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}\" SYNAPSE_SPARK_POOL_NAME=\"$SYNAPSE_SPARK_POOL_NAME\" SYNAPSE_WORKSPACE_NAME=\"$SYNAPSE_WORKSPACE_NAME\" AZURE_SUBSCRIPTION_ID=\"$AZURE_SUBSCRIPTION_ID\" AZURE_RESOURCE_GROUP=\"$AZURE_RESOURCE_GROUP\" DATA_PATH=\"$DATA_PATH_VAL\" AZURE_STORAGE_ACCOUNT_NAME=\"$SYNAPSE_STORAGE_ACCOUNT\" AZURE_STORAGE_CONTAINER=\"$SYNAPSE_FILE_SYSTEM\" API_PORT=8000"
+    if [ -n "$STORAGE_KEY_VAL" ]; then
+        MANUAL_CMD="$MANUAL_CMD AZURE_STORAGE_ACCOUNT_KEY=\"$STORAGE_KEY_VAL\""
+    fi
+    if [ -n "${API_IDENTITY_CLIENT_ID:-}" ]; then
+        MANUAL_CMD="$MANUAL_CMD AZURE_CLIENT_ID=\"$API_IDENTITY_CLIENT_ID\""
+    fi
+    echo "  $MANUAL_CMD"
+    if [ -z "${API_IDENTITY_ID:-}" ]; then
+        echo ""
+        echo "  Synapse role (for system-assigned, after container is running):"
+        echo "  az synapse role assignment create --workspace-name $SYNAPSE_WORKSPACE_NAME --role '$SYNAPSE_ROLE' --assignee-object-id \$(az container show -g $RESOURCE_GROUP -n $API_CONTAINER_NAME --query identity.principalId -o tsv) --assignee-principal-type ServicePrincipal"
+    fi
 fi
 if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo "  Streamlit logs: az webapp log tail --name $STREAMLIT_APP_NAME --resource-group $RESOURCE_GROUP"
     echo "  Restart Streamlit: az webapp restart --name $STREAMLIT_APP_NAME --resource-group $RESOURCE_GROUP"
     echo "  Delete Streamlit: az webapp delete --name $STREAMLIT_APP_NAME --resource-group $RESOURCE_GROUP"
 fi
+echo "  Full cleanup: ./cleanup_azure.sh (deletes all deployed resources)"
 echo ""
-echo "📝 Next Steps:"
-echo "  1. Upload data to Azure Data Lake Storage: abfss://$SYNAPSE_FILE_SYSTEM@$SYNAPSE_STORAGE_ACCOUNT.dfs.core.windows.net/"
-echo "  2. Configure DATA_PATH environment variable to point to your data location"
-echo "  3. Test the API endpoints using the URLs above"
+echo "📝 Next Steps (if not done by script):"
+echo "  - Synapse auth: User-assigned managed identity"
+echo "  - Populate storage: python3 download_data.py --years 2024 --upload"
+echo "  - Test API: curl http://<container-fqdn>:8000/health"
 echo ""
 

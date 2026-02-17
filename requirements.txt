@@ -1,20 +1,19 @@
 # Core Dependencies
-# Note: PySpark is required for Azure Synapse Spark API types
-# Spark execution happens remotely in Azure Synapse pools, not locally
-pyspark==3.5.0
+# Note: PySpark removed - all Spark execution is in Azure Synapse via Livy API
 pyarrow==14.0.1
 pandas==2.1.4
 
 # Azure Dependencies
 azure-identity==1.15.0
 azure-synapse-spark==0.7.0
-openai>=2.0.0,<3.0.0
+six>=1.16.0
+openai>=2.20.0,<3.0.0
 azure-storage-blob==12.19.0
 
 # API and Web Framework
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
-pydantic==2.5.3
+pydantic>=2.5.3,<3.0.0
 pydantic-settings==2.1.0
 streamlit==1.29.0
 plotly==5.17.0

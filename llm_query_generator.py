@@ -2,7 +2,7 @@
 LLM-powered query generation module using Azure OpenAI
 Converts natural language questions into Spark SQL queries
 """
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Literal
 from openai import AzureOpenAI
 import json
 import logging
@@ -95,22 +95,39 @@ class QueryGenerator:
         try:
             # GPT-5.2 requires max_completion_tokens instead of max_tokens
             # SDK 2.x supports max_completion_tokens directly
+            # Note: Not using response_format due to pydantic serialization bug in OpenAI SDK
+            # The system prompt already instructs the model to return JSON, so this should work fine
             response = self.client.chat.completions.create(
                 model=self.deployment_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_completion_tokens=2000,  # Limit response length for SQL queries
-                response_format={"type": "json_object"}
+                max_completion_tokens=2000  # Limit response length for SQL queries
             )
             
             result_text = response.choices[0].message.content
+            
+            # Try to extract JSON from the response (might be wrapped in markdown code blocks)
+            result_text = result_text.strip()
+            if result_text.startswith("```json"):
+                result_text = result_text[7:]  # Remove ```json
+            elif result_text.startswith("```"):
+                result_text = result_text[3:]   # Remove ```
+            if result_text.endswith("```"):
+                result_text = result_text[:-3]   # Remove closing ```
+            result_text = result_text.strip()
+            
             result = json.loads(result_text)
             
             logger.info(f"Successfully generated query: {result.get('query', '')[:100]}...")
             return result
             
+        except json.JSONDecodeError as e:
+            result_text_safe = result_text if 'result_text' in locals() else "N/A"
+            logger.error(f"Failed to parse JSON response: {e}")
+            logger.error(f"Response content: {result_text_safe[:500] if result_text_safe != 'N/A' else 'N/A'}...")
+            raise ValueError(f"Model did not return valid JSON. Response: {result_text_safe[:200] if result_text_safe != 'N/A' else 'N/A'}...")
         except Exception as e:
             logger.error(f"Error generating query: {e}")
             raise
@@ -197,22 +214,39 @@ Return your response as JSON with the following structure:
 """
         
         try:
+            # Note: Not using response_format due to pydantic serialization bug in OpenAI SDK
+            # The system prompt already instructs the model to return JSON
             response = self.client.chat.completions.create(
                 model=self.deployment_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_completion_tokens=2000,  # Limit response length for refined queries
-                response_format={"type": "json_object"}
+                max_completion_tokens=2000  # Limit response length for refined queries
             )
             
             result_text = response.choices[0].message.content
+            
+            # Try to extract JSON from the response (might be wrapped in markdown code blocks)
+            result_text = result_text.strip()
+            if result_text.startswith("```json"):
+                result_text = result_text[7:]
+            elif result_text.startswith("```"):
+                result_text = result_text[3:]
+            if result_text.endswith("```"):
+                result_text = result_text[:-3]
+            result_text = result_text.strip()
+            
             result = json.loads(result_text)
             
             logger.info("Successfully refined query")
             return result
             
+        except json.JSONDecodeError as e:
+            result_text_safe = result_text if 'result_text' in locals() else "N/A"
+            logger.error(f"Failed to parse JSON response: {e}")
+            logger.error(f"Response content: {result_text_safe[:500] if result_text_safe != 'N/A' else 'N/A'}...")
+            raise ValueError(f"Model did not return valid JSON. Response: {result_text_safe[:200] if result_text_safe != 'N/A' else 'N/A'}...")
         except Exception as e:
             logger.error(f"Error refining query: {e}")
             raise
@@ -243,21 +277,38 @@ Return your response as JSON:
 """
         
         try:
+            # Note: Not using response_format due to pydantic serialization bug in OpenAI SDK
+            # The prompt already instructs the model to return JSON
             response = self.client.chat.completions.create(
                 model=self.deployment_name,
                 messages=[
                     {"role": "system", "content": "You are a data analysis assistant specializing in NYC taxi and ride-share data."},
                     {"role": "user", "content": prompt}
                 ],
-                max_completion_tokens=500,  # Short explanations
-                response_format={"type": "json_object"}
+                max_completion_tokens=500  # Short explanations
             )
             
             result_text = response.choices[0].message.content
+            
+            # Try to extract JSON from the response (might be wrapped in markdown code blocks)
+            result_text = result_text.strip()
+            if result_text.startswith("```json"):
+                result_text = result_text[7:]
+            elif result_text.startswith("```"):
+                result_text = result_text[3:]
+            if result_text.endswith("```"):
+                result_text = result_text[:-3]
+            result_text = result_text.strip()
+            
             result = json.loads(result_text)
             
             return result.get('suggestions', [])
             
+        except json.JSONDecodeError as e:
+            result_text_safe = result_text if 'result_text' in locals() else "N/A"
+            logger.error(f"Failed to parse JSON response for suggestions: {e}")
+            logger.error(f"Response content: {result_text_safe[:500] if result_text_safe != 'N/A' else 'N/A'}...")
+            return []  # Return empty list on JSON parse error for suggestions
         except Exception as e:
             logger.error(f"Error generating suggestions: {e}")
             return []

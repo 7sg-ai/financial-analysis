@@ -1,12 +1,13 @@
 """
 Main analysis engine that orchestrates all components
 Integrates query generation, execution, and response formatting
+Uses Azure Synapse Spark exclusively (no local PySpark).
 """
 from typing import Dict, Any, Optional, List
-from pyspark.sql import SparkSession
 import logging
 
-from data_loader import DataLoader, create_spark_session
+from synapse_client import create_synapse_session, SynapseConnectionError
+from data_loader import DataLoader
 from llm_query_generator import QueryGenerator, NarrativeGenerator
 from query_executor import QueryExecutor
 from response_formatter import AnalysisResponse, ResponseFormatter
@@ -17,67 +18,42 @@ logger = logging.getLogger(__name__)
 
 class FinancialAnalysisEngine:
     """
-    Main engine for financial analysis queries
-    Coordinates all components to answer user questions
+    Main engine for financial analysis queries.
+    All Spark execution runs in Azure Synapse.
     """
-    
-    def __init__(
-        self,
-        settings: Settings,
-        spark_session: Optional[SparkSession] = None
-    ):
-        """
-        Initialize FinancialAnalysisEngine
-        
-        Args:
-            settings: Application settings
-            spark_session: Optional pre-configured Spark session
-        """
+
+    def __init__(self, settings: Settings):
         self.settings = settings
-        
-        # Initialize Spark
-        # Spark session connects to Azure Synapse Spark pools remotely
-        if spark_session:
-            self.spark = spark_session
-        else:
-            self.spark = create_spark_session(
-                app_name="FinancialAnalysis",
-                settings=settings
-            )
-        
-        # Initialize components
-        self.data_loader = DataLoader(self.spark, settings.data_path)
+        self._session = create_synapse_session(settings)
+        self.data_loader = DataLoader(self._session)
         self.query_generator = QueryGenerator(
             endpoint=settings.azure_openai_endpoint,
             api_key=settings.azure_openai_api_key,
             deployment_name=settings.azure_openai_deployment_name,
-            api_version=settings.azure_openai_api_version
+            api_version=settings.azure_openai_api_version,
         )
         self.narrative_generator = NarrativeGenerator(
             endpoint=settings.azure_openai_endpoint,
             api_key=settings.azure_openai_api_key,
             deployment_name=settings.azure_openai_deployment_name,
-            api_version=settings.azure_openai_api_version
+            api_version=settings.azure_openai_api_version,
         )
-        self.query_executor = QueryExecutor(self.spark, max_result_rows=1000)
+        self.query_executor = QueryExecutor(self._session, max_result_rows=1000)
         self.response_formatter = ResponseFormatter()
-        
-        # Load data and register views
         self._data_loaded = False
-        
-        logger.info("FinancialAnalysisEngine initialized")
+        logger.info("FinancialAnalysisEngine initialized (Azure Synapse)")
     
     def initialize_data(
         self,
         months: Optional[List[str]] = None,
-        year: str = "2024"
+        year: Optional[str] = None
     ) -> None:
         """
         Load data and register Spark SQL views
         
         Args:
             months: Months to load (None = all)
-            year: Year to load data for
+            year: Year to load. If None, loads all available years (2023-2025)
         """
         if self._data_loaded:
             logger.info("Data already loaded, skipping initialization")
@@ -95,51 +71,19 @@ class FinancialAnalysisEngine:
     def check_and_reload_data(
         self,
         months: Optional[List[str]] = None,
-        year: str = "2024"
+        year: Optional[str] = None,
     ) -> bool:
         """
-        Check for new data files and reload if found
-        
-        Args:
-            months: Months to check (None = all)
-            year: Year to check data for
-            
-        Returns:
-            True if new data was loaded, False otherwise
+        Reload data and re-register views in Synapse.
+        With Synapse we always attempt reload when called.
         """
-        if self._data_loaded:
-            # Check if there are new files
-            import glob
-            from pathlib import Path
-            data_path = Path(self.settings.data_path)
-            
-            patterns = [
-                f"yellow_tripdata_{year}-*.parquet",
-                f"green_tripdata_{year}-*.parquet",
-                f"fhv_tripdata_{year}-*.parquet",
-                f"fhvhv_tripdata_{year}-*.parquet"
-            ]
-            
-            has_new_files = any(
-                glob.glob(str(data_path / pattern))
-                for pattern in patterns
-            )
-            
-            if not has_new_files:
-                return False
-        
-        # Try to reload data
-        logger.info("Checking for new data files...")
+        self.data_loader.clear_cache()
+        logger.info("Reloading data in Synapse...")
         success = self.data_loader.register_temp_views(months=months, year=year)
-        if success and not self._data_loaded:
+        if success:
             self._data_loaded = True
-            logger.info("New data files detected and loaded successfully")
-            return True
-        elif success:
-            logger.info("Data views refreshed with new files")
-            return True
-        
-        return False
+            logger.info("Data views refreshed")
+        return success
     
     def analyze(
         self,
@@ -418,11 +362,11 @@ class FinancialAnalysisEngine:
         return self.query_executor.get_query_history(limit=limit)
     
     def shutdown(self) -> None:
-        """Shutdown the engine and clean up resources"""
+        """Shutdown the engine and close Synapse session."""
         logger.info("Shutting down FinancialAnalysisEngine")
         try:
-            self.spark.stop()
-            logger.info("Spark session stopped")
+            self._session.close()
+            logger.info("Synapse session closed")
         except Exception as e:
-            logger.error(f"Error stopping Spark session: {e}")
+            logger.error(f"Error closing Synapse session: {e}")
 

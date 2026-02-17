@@ -78,7 +78,18 @@ class SynapseSparkSession:
             conf[key] = self._storage_key
             logger.info(f"Configured Spark for Azure Storage: {self._storage_account}")
 
-        # Tuned for 3 Small nodes (12 vCores, 96 GB total)
+        # Dynamic executor allocation: scale executors based on query complexity.
+        # Requires pool to have --enable-dynamic-exec (see deploy_azure.sh).
+        # Max 5 executors so driver (2) + 5*2 = 12 vCores fits in 3 Small nodes.
+        conf["spark.dynamicAllocation.enabled"] = "true"
+        conf["spark.dynamicAllocation.minExecutors"] = "1"
+        conf["spark.dynamicAllocation.maxExecutors"] = "5"
+        conf["spark.dynamicAllocation.initialExecutors"] = "2"
+        # Shuffle tracking allows executor release without external shuffle service
+        conf["spark.dynamicAllocation.shuffleTracking.enabled"] = "true"
+
+        # Base config for 3 Small nodes (12 vCores, 96 GB total)
+        # executor_count=2 is initial; dynamic allocation adjusts at runtime
         opts = SparkSessionOptions(
             name="FinancialAnalysis",
             configuration=conf,

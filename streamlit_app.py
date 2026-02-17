@@ -333,15 +333,21 @@ def main():
         include_narrative = st.checkbox("Include Narrative", value=True)
         max_rows = st.slider("Max Rows", 10, 1000, 100)
         
-        # Data info
+        # Data info (from API /api/data-status)
         if st.session_state.api_available:
             st.markdown("### 📊 Data Info")
             try:
-                info = st.session_state.analysis_engine.get_dataset_info()
-                for dataset, stats in info.items():
-                    if 'row_count' in stats:
-                        st.text(f"{dataset}: {stats['row_count']:,} rows")
-            except:
+                import httpx
+                r = httpx.get(f"{st.session_state.api_url}/api/data-status", timeout=10.0)
+                if r.status_code == 200:
+                    data = r.json()
+                    for view_name, detail in data.get("views", {}).get("details", {}).items():
+                        rc = detail.get("row_count")
+                        if rc is not None:
+                            st.text(f"{view_name}: {rc:,} rows")
+                else:
+                    st.text("Data info unavailable")
+            except Exception:
                 st.text("Data info unavailable")
 
     # Main content area

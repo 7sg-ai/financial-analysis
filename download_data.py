@@ -13,6 +13,12 @@ Usage Examples:
     # Download only 2024 data (recommended for testing)
     python3 download_data.py --years 2024
     
+    # Download and upload to Azure Storage (for Synapse Spark pool)
+    python3 download_data.py --years 2024 --upload
+
+    # Upload-only: Populate storage from existing src_data (e.g. from inside container)
+    python3 download_data.py --upload-only
+    
     # Download only yellow and green taxis
     python3 download_data.py --service-types yellow green
     
@@ -27,6 +33,14 @@ Usage Examples:
     
     # Show help
     python3 download_data.py --help
+
+Upload to Azure Storage (for Synapse Spark):
+    Set these environment variables before using --upload:
+    - AZURE_STORAGE_ACCOUNT_NAME (or SYNAPSE_STORAGE_ACCOUNT)
+    - AZURE_STORAGE_ACCOUNT_KEY
+    - AZURE_STORAGE_CONTAINER (or SYNAPSE_FILE_SYSTEM, default: data)
+    
+    After upload, set DATA_PATH to: abfss://<container>@<account>.dfs.core.windows.net/<storage-path>/
 
 Data Sources:
     - Yellow Taxi: https://d37ci6vzurychx.cloudfront.net/trip-data/
@@ -54,6 +68,7 @@ from pathlib import Path
 import logging
 import argparse
 import time
+from typing import Optional, Tuple
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -162,6 +177,112 @@ def download_parquet_data(service_types=None, years=None, months=None, skip_exis
     
     return success_count, total_count
 
+
+def get_storage_config() -> Optional[Tuple[str, str, str]]:
+    """
+    Get Azure Storage configuration from environment variables.
+    Returns (account_name, account_key, container) or None if not configured.
+    """
+    account_name = os.environ.get("AZURE_STORAGE_ACCOUNT_NAME") or os.environ.get("SYNAPSE_STORAGE_ACCOUNT")
+    account_key = os.environ.get("AZURE_STORAGE_ACCOUNT_KEY")
+    container = os.environ.get("AZURE_STORAGE_CONTAINER") or os.environ.get("SYNAPSE_FILE_SYSTEM", "data")
+    
+    if account_name and account_key:
+        return (account_name, account_key, container)
+    return None
+
+
+def upload_file_to_storage(
+    local_path: Path,
+    blob_path: str,
+    account_name: str,
+    account_key: str,
+    container_name: str,
+    skip_existing: bool = True
+) -> bool:
+    """Upload a single file to Azure Blob Storage (Data Lake Gen2 compatible)."""
+    try:
+        from azure.storage.blob import BlobServiceClient
+        
+        blob_service = BlobServiceClient(
+            account_url=f"https://{account_name}.blob.core.windows.net",
+            credential=account_key
+        )
+        container_client = blob_service.get_container_client(container_name)
+        blob_client = container_client.get_blob_client(blob_path)
+        
+        if skip_existing and blob_client.exists():
+            logger.info(f"⏭️  Skipping upload (exists in storage): {blob_path}")
+            return True
+        
+        with open(local_path, "rb") as data:
+            blob_client.upload_blob(data, overwrite=True)
+        
+        file_size_mb = local_path.stat().st_size / (1024 * 1024)
+        logger.info(f"☁️  Uploaded {local_path.name} -> {blob_path} ({file_size_mb:.1f} MB)")
+        return True
+    except ImportError:
+        logger.error("azure-storage-blob package required for upload. Install with: pip install azure-storage-blob")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Failed to upload {local_path.name}: {e}")
+        return False
+
+
+def upload_to_storage(
+    data_dir: Path,
+    storage_path: str,
+    account_name: str,
+    account_key: str,
+    container_name: str,
+    skip_existing: bool = True
+) -> Tuple[int, int]:
+    """
+    Upload all parquet files and taxi_zone_lookup.csv from data_dir to Azure Storage.
+    
+    Args:
+        data_dir: Local directory containing downloaded files
+        storage_path: Path prefix within container (e.g. "taxi-data")
+        account_name: Azure Storage account name
+        account_key: Azure Storage account key
+        container_name: Container (file system) name
+        skip_existing: Skip files that already exist in storage
+        
+    Returns:
+        (success_count, total_count)
+    """
+    success_count = 0
+    total_count = 0
+    
+    # Normalize storage path (no leading/trailing slashes)
+    prefix = storage_path.strip("/") if storage_path else ""
+    
+    # Parquet patterns
+    parquet_patterns = [
+        "yellow_tripdata_*.parquet",
+        "green_tripdata_*.parquet",
+        "fhv_tripdata_*.parquet",
+        "fhvhv_tripdata_*.parquet"
+    ]
+    
+    for pattern in parquet_patterns:
+        for filepath in data_dir.glob(pattern):
+            blob_path = f"{prefix}/{filepath.name}" if prefix else filepath.name
+            total_count += 1
+            if upload_file_to_storage(filepath, blob_path, account_name, account_key, container_name, skip_existing):
+                success_count += 1
+    
+    # Taxi zones CSV
+    zones_file = data_dir / "taxi_zone_lookup.csv"
+    if zones_file.exists():
+        blob_path = f"{prefix}/taxi_zone_lookup.csv" if prefix else "taxi_zone_lookup.csv"
+        total_count += 1
+        if upload_file_to_storage(zones_file, blob_path, account_name, account_key, container_name, skip_existing):
+            success_count += 1
+    
+    return success_count, total_count
+
+
 def download_taxi_zones():
     """Download and extract taxi zones data"""
     data_dir = Path("src_data")
@@ -212,6 +333,14 @@ def main():
                        help="Months to download (1-12, default: all)")
     parser.add_argument("--skip-existing", action="store_true", default=True,
                        help="Skip files that already exist")
+    parser.add_argument("--upload", action="store_true",
+                       help="Upload downloaded files to Azure Storage (for Synapse Spark pool)")
+    parser.add_argument("--upload-only", action="store_true",
+                       help="Upload existing src_data files to Azure Storage (skip download). Use when container has files but storage is empty.")
+    parser.add_argument("--storage-path", default="taxi-data",
+                       help="Path within storage container (default: taxi-data)")
+    parser.add_argument("--skip-existing-in-storage", action="store_true", default=True,
+                       help="Skip uploading files that already exist in storage")
     parser.add_argument("--verbose", "-v", action="store_true",
                        help="Enable verbose logging")
     
@@ -223,6 +352,36 @@ def main():
     
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+    
+    # Upload-only mode: skip download, just upload existing src_data to storage
+    if args.upload_only:
+        logger.info("🚕 Upload-only mode - uploading existing src_data to Azure Storage")
+        logger.info("=" * 70)
+        data_dir = Path("src_data")
+        if not data_dir.exists():
+            logger.error("src_data directory not found. Run from project root or where src_data exists.")
+            exit(1)
+        storage_config = get_storage_config()
+        if not storage_config:
+            logger.error("Storage config required. Set AZURE_STORAGE_ACCOUNT_NAME, AZURE_STORAGE_ACCOUNT_KEY")
+            exit(1)
+        account_name, account_key, container_name = storage_config
+        logger.info(f"  Source: {data_dir.absolute()}")
+        logger.info(f"  Target: {container_name}@{account_name}")
+        logger.info("=" * 70)
+        upload_success, upload_total = upload_to_storage(
+            data_dir=data_dir,
+            storage_path=args.storage_path,
+            account_name=account_name,
+            account_key=account_key,
+            container_name=container_name,
+            skip_existing=args.skip_existing_in_storage
+        )
+        logger.info(f"\n✅ Uploaded {upload_success}/{upload_total} files to Azure Storage")
+        if upload_success > 0:
+            data_path = f"abfss://{container_name}@{account_name}.dfs.core.windows.net/{args.storage_path.strip('/')}/"
+            logger.info(f"   DATA_PATH: {data_path}")
+        exit(0 if upload_success > 0 else 1)
     
     logger.info("🚕 Starting NYC Taxi Data Download (Azure Environment)")
     logger.info("=" * 70)
@@ -247,17 +406,46 @@ def main():
     logger.info("\n🗺️  Downloading taxi zones...")
     zones_success = download_taxi_zones()
     
+    # Upload to Azure Storage if requested
+    upload_success = None
+    if args.upload:
+        logger.info("\n☁️  Uploading to Azure Storage (for Synapse Spark pool)...")
+        storage_config = get_storage_config()
+        if storage_config:
+            account_name, account_key, container_name = storage_config
+            data_dir = Path("src_data")
+            upload_success, upload_total = upload_to_storage(
+                data_dir=data_dir,
+                storage_path=args.storage_path,
+                account_name=account_name,
+                account_key=account_key,
+                container_name=container_name,
+                skip_existing=args.skip_existing_in_storage
+            )
+            logger.info(f"  Uploaded: {upload_success}/{upload_total} files")
+            if upload_success > 0:
+                data_path = f"abfss://{container_name}@{account_name}.dfs.core.windows.net/{args.storage_path.strip('/')}/"
+                logger.info(f"  DATA_PATH for API: {data_path}")
+        else:
+            logger.warning("⚠️  Upload skipped: Set AZURE_STORAGE_ACCOUNT_NAME, AZURE_STORAGE_ACCOUNT_KEY (and optionally AZURE_STORAGE_CONTAINER)")
+    
     # Summary
     logger.info("\n" + "=" * 60)
     logger.info("📋 Download Summary:")
     logger.info(f"  Parquet files: {success}/{total} successful")
     logger.info(f"  Taxi zones: {'✅' if zones_success else '❌'}")
+    if upload_success is not None:
+        logger.info(f"  Storage upload: {upload_success} files")
     logger.info(f"  Data period: {min(years)}-{max(years)}")
     logger.info(f"  Estimated size: ~{len(years) * len(months) * 2:.0f} GB total")
     
     if success == total and zones_success:
         logger.info("\n🎉 All data downloaded successfully!")
-        logger.info("☁️  Data is now available in your Azure container")
+        if args.upload and upload_success and upload_success > 0:
+            logger.info("☁️  Data uploaded to Azure Storage - Spark pool can now access it")
+            logger.info("   Set DATA_PATH in your API environment to the path shown above")
+        else:
+            logger.info("☁️  Data is now available in your local src_data/ directory")
         logger.info("🌐 Access your application at the deployed URLs")
         logger.info("💡 Consider using specific months for testing to reduce costs")
     else:

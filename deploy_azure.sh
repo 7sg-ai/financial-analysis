@@ -318,10 +318,33 @@ if ! az synapse spark pool show \
         --node-count 3 \
         --node-size Small \
         --spark-version 3.3 \
+        --enable-auto-scale true \
+        --min-node-count 3 \
+        --max-node-count 10 \
+        --enable-dynamic-exec true \
+        --min-executors 1 \
+        --max-executors 5 \
         --output none
-    echo "✓ Spark pool created"
+    echo "✓ Spark pool created (autoscale 3–10 nodes, 12 vCores min, dynamic allocation enabled)"
 else
     echo "✓ Spark pool exists"
+    # Ensure autoscale (3–10 nodes) and dynamic executor allocation are enabled
+    echo "Ensuring pool autoscale and dynamic executor allocation..."
+    if az synapse spark pool update \
+        --workspace-name "$SYNAPSE_WORKSPACE_NAME" \
+        --resource-group "$RESOURCE_GROUP" \
+        --name "$SYNAPSE_SPARK_POOL_NAME" \
+        --enable-auto-scale true \
+        --min-node-count 3 \
+        --max-node-count 10 \
+        --enable-dynamic-exec true \
+        --min-executors 1 \
+        --max-executors 5 \
+        --output none 2>/dev/null; then
+        echo "  ✓ Autoscale 3–10 nodes (12 vCores min), dynamic allocation enabled"
+    else
+        echo "  (Autoscale or dynamic allocation may already be configured)"
+    fi
 fi
 
 # Create container registry if it doesn't exist (needed for all options)
@@ -349,16 +372,24 @@ assign_synapse_and_storage_rbac() {
     fi
     echo ""
     echo "Assigning Synapse and Storage RBAC (same as option 5)..."
-    SYNAPSE_ROLES_TO_TRY=("$SYNAPSE_ROLE" "Synapse Administrator" "Synapse Contributor" "Synapse Compute Operator")
     SYNAPSE_ASSIGNED=false
-    for ROLE in "${SYNAPSE_ROLES_TO_TRY[@]}"; do
-        [ -z "$ROLE" ] && continue
-        if az synapse role assignment create --workspace-name "$SYNAPSE_WORKSPACE_NAME" --role "$ROLE" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal 2>/dev/null; then
-            echo "  ✓ Synapse role '$ROLE' assigned"
-            SYNAPSE_ASSIGNED=true
-            break
-        fi
-    done
+    # If identity already has Synapse Administrator, skip trying other roles
+    EXISTING_SYNAPSE=$(az synapse role assignment list --workspace-name "$SYNAPSE_WORKSPACE_NAME" --query "[?principalId=='$principal_id'].roleName" -o tsv 2>/dev/null | tr '\t' '\n')
+    if echo "$EXISTING_SYNAPSE" | grep -qx "Synapse Administrator"; then
+        echo "  ✓ Identity already has Synapse Administrator (skipping other role attempts)"
+        SYNAPSE_ASSIGNED=true
+    fi
+    if [ "$SYNAPSE_ASSIGNED" = false ]; then
+        SYNAPSE_ROLES_TO_TRY=("$SYNAPSE_ROLE" "Synapse Administrator" "Synapse Contributor" "Synapse Compute Operator")
+        for ROLE in "${SYNAPSE_ROLES_TO_TRY[@]}"; do
+            [ -z "$ROLE" ] && continue
+            if az synapse role assignment create --workspace-name "$SYNAPSE_WORKSPACE_NAME" --role "$ROLE" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal 2>/dev/null; then
+                echo "  ✓ Synapse role '$ROLE' assigned"
+                SYNAPSE_ASSIGNED=true
+                break
+            fi
+        done
+    fi
     if [ "$SYNAPSE_ASSIGNED" = false ]; then
         echo "  ⚠️  Synapse role may already be assigned. If 403 useCompute persists, run option 5."
     fi

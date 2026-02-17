@@ -88,6 +88,8 @@ if 'api_available' not in st.session_state:
     st.session_state.api_available = False
 if 'query_history' not in st.session_state:
     st.session_state.query_history = []
+if 'question_input' not in st.session_state:
+    st.session_state.question_input = ""
 
 # Log the current API URL being used
 logger.info(f"Using API URL: {st.session_state.api_url} (from env: {env_api_url})")
@@ -315,7 +317,8 @@ def main():
         
         for i, question in enumerate(example_questions):
             if st.button(f"💬 {question[:50]}...", key=f"example_{i}"):
-                st.session_state.selected_question = question
+                st.session_state.question_input = question
+                st.rerun()
         
         st.markdown("---")
         
@@ -324,7 +327,8 @@ def main():
             st.markdown("### 📚 Recent Queries")
             for i, (question, timestamp) in enumerate(st.session_state.query_history[-5:]):
                 if st.button(f"🔄 {question[:30]}...", key=f"history_{i}"):
-                    st.session_state.selected_question = question
+                    st.session_state.question_input = question
+                    st.rerun()
         
         st.markdown("---")
         
@@ -401,17 +405,11 @@ def main():
     st.markdown('<div class="query-box">', unsafe_allow_html=True)
     st.markdown("### 🔍 Ask a Question")
     
-    # Pre-fill with selected question
-    default_question = ""
-    if 'selected_question' in st.session_state:
-        default_question = st.session_state.selected_question
-        del st.session_state.selected_question
-    
     question = st.text_area(
         "Enter your question about the taxi data:",
-        value=default_question,
         height=100,
-        placeholder="e.g., What was the total revenue from yellow taxis in January 2024?"
+        placeholder="e.g., What was the total revenue from yellow taxis in January 2024?",
+        key="question_input",
     )
     
     col1, col2, col3 = st.columns([1, 1, 2])
@@ -426,6 +424,7 @@ def main():
     
     # Handle clear button
     if clear_button:
+        st.session_state.question_input = ""
         st.rerun()
     
     # Handle analyze button
@@ -471,7 +470,7 @@ def main():
                 st.text(f"Time: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
                 st.text(f"Question: {q}")
                 if st.button(f"Re-run Query {len(st.session_state.query_history) - i}", key=f"rerun_{i}"):
-                    st.session_state.selected_question = q
+                    st.session_state.question_input = q
                     st.rerun()
 
 if __name__ == "__main__":

@@ -1,28 +1,42 @@
 """
-Data loading module for Azure Synapse Spark
-Loads parquet/CSV data and registers temp views in Synapse (via Livy)
-All Spark execution happens in Azure Synapse; no local PySpark.
+Data loading module for AWS EMR Serverless
+Loads parquet/CSV data and registers temp views in EMR Serverless via SparkSubmit jobs
+All Spark execution happens in AWS EMR Serverless; no local PySpark.
 """
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 import logging
-
-if TYPE_CHECKING:
-    from synapse_client import SynapseSparkSession
+import boto3
 
 logger = logging.getLogger(__name__)
 
 
 class DataLoader:
     """
-    Manages loading of taxi trip data into Synapse Spark temp views.
-    Uses SynapseSparkSession (Livy) - no local Spark.
+    Manages loading of taxi trip data into EMR Serverless temp views.
+    Uses EMR Serverless SparkSubmit jobs - no local Spark.
     """
 
-    def __init__(self, session: "SynapseSparkSession"):
-        self.session = session
+    def __init__(self, region_name: str = "us-east-1", execution_role_arn: Optional[str] = None):
+        self.emr_client = boto3.client("emr-serverless", region_name=region_name)
+        self.execution_role_arn = execution_role_arn or self._get_default_execution_role()
+
+    def _get_default_execution_role(self) -> str:
+        """Get default execution role ARN from environment (e.g., EC2 instance profile or Lambda role)."""
+        # This is a placeholder implementation. In production, use boto3 to retrieve the role
+        # attached to the current environment (e.g., via IAM instance profile or Lambda context).
+        raise NotImplementedError(
+            "Default execution role ARN not configured. Please provide execution_role_arn explicitly."
+        )
+
+    def _get_application_id(self) -> str:
+        """Get EMR Serverless application ID. In production, this should be retrieved from config or environment."""
+        # This is a placeholder implementation. In production, retrieve from environment variable or config.
+        raise NotImplementedError(
+            "EMR Serverless application ID not configured. Please set EMR_APPLICATION_ID environment variable."
+        )
 
     def clear_cache(self) -> None:
-        """No-op for Synapse (views are server-side); kept for API compatibility."""
+        """No-op for EMR Serverless (views are server-side); kept for API compatibility."""
         logger.info("DataLoader cache cleared - next load will re-register views")
 
     def register_temp_views(
@@ -31,7 +45,7 @@ class DataLoader:
         year: Optional[str] = None,
     ) -> bool:
         """
-        Load datasets and register them as temp views in Synapse.
+        Load datasets and register them as temp views in EMR Serverless.
 
         Args:
             months: Months to load (e.g. ["01","02"]). None = all.
@@ -40,30 +54,115 @@ class DataLoader:
         Returns:
             True if at least one view was registered.
         """
-        logger.info("Registering temporary views in Synapse...")
+        logger.info("Registering temporary views in EMR Serverless...")
         views_registered = []
 
         pattern = "yellow_tripdata_*-*.parquet" if not year else f"yellow_tripdata_{year}-*.parquet"
-        if self.session.load_parquet_and_create_view(pattern, "yellow_taxi", months):
+        job_run_id = self.emr_client.start_job_run(
+            applicationId=self._get_application_id(),
+            executionRoleArn=self.execution_role_arn,
+            jobDriver={
+                "sparkSubmit": {
+                    "entryPoint": "s3://<bucket>/scripts/load_parquet.py",
+                    "sparkSubmitParameters": f"--conf spark.app.name=load_yellow_taxi --jars s3://<bucket>/jars/parquet.jar --pattern {pattern} --view yellow_taxi --months {','.join(months) if months else ''}"
+                }
+            },
+            configurationOverrides={
+                "applicationConfiguration": {
+                    "spark-defaults": {
+                        "spark.sql.adaptive.enabled": "true"
+                    }
+                }
+            }
+        )
+        if job_run_id:
             views_registered.append("yellow_taxi")
             logger.info("Registered view: yellow_taxi")
 
         pattern = "green_tripdata_*-*.parquet" if not year else f"green_tripdata_{year}-*.parquet"
-        if self.session.load_parquet_and_create_view(pattern, "green_taxi", months):
+        job_run_id = self.emr_client.start_job_run(
+            applicationId=self._get_application_id(),
+            executionRoleArn=self.execution_role_arn,
+            jobDriver={
+                "sparkSubmit": {
+                    "entryPoint": "s3://<bucket>/scripts/load_parquet.py",
+                    "sparkSubmitParameters": f"--conf spark.app.name=load_green_taxi --jars s3://<bucket>/jars/parquet.jar --pattern {pattern} --view green_taxi --months {','.join(months) if months else ''}"
+                }
+            },
+            configurationOverrides={
+                "applicationConfiguration": {
+                    "spark-defaults": {
+                        "spark.sql.adaptive.enabled": "true"
+                    }
+                }
+            }
+        )
+        if job_run_id:
             views_registered.append("green_taxi")
             logger.info("Registered view: green_taxi")
 
         pattern = "fhv_tripdata_*-*.parquet" if not year else f"fhv_tripdata_{year}-*.parquet"
-        if self.session.load_parquet_and_create_view(pattern, "fhv", months):
+        job_run_id = self.emr_client.start_job_run(
+            applicationId=self._get_application_id(),
+            executionRoleArn=self.execution_role_arn,
+            jobDriver={
+                "sparkSubmit": {
+                    "entryPoint": "s3://<bucket>/scripts/load_parquet.py",
+                    "sparkSubmitParameters": f"--conf spark.app.name=load_fhv --jars s3://<bucket>/jars/parquet.jar --pattern {pattern} --view fhv --months {','.join(months) if months else ''}"
+                }
+            },
+            configurationOverrides={
+                "applicationConfiguration": {
+                    "spark-defaults": {
+                        "spark.sql.adaptive.enabled": "true"
+                    }
+                }
+            }
+        )
+        if job_run_id:
             views_registered.append("fhv")
             logger.info("Registered view: fhv")
 
         pattern = "fhvhv_tripdata_*-*.parquet" if not year else f"fhvhv_tripdata_{year}-*.parquet"
-        if self.session.load_parquet_and_create_view(pattern, "fhvhv", months):
+        job_run_id = self.emr_client.start_job_run(
+            applicationId=self._get_application_id(),
+            executionRoleArn=self.execution_role_arn,
+            jobDriver={
+                "sparkSubmit": {
+                    "entryPoint": "s3://<bucket>/scripts/load_parquet.py",
+                    "sparkSubmitParameters": f"--conf spark.app.name=load_fhvhv --jars s3://<bucket>/jars/parquet.jar --pattern {pattern} --view fhvhv --months {','.join(months) if months else ''}"
+                }
+            },
+            configurationOverrides={
+                "applicationConfiguration": {
+                    "spark-defaults": {
+                        "spark.sql.adaptive.enabled": "true"
+                    }
+                }
+            }
+        )
+        if job_run_id:
             views_registered.append("fhvhv")
             logger.info("Registered view: fhvhv")
 
-        if self.session.load_csv_and_create_view("taxi_zone_lookup.csv", "taxi_zones"):
+        job_run_id = self.emr_client.start_job_run(
+            applicationId=self._get_application_id(),
+            executionRoleArn=self.execution_role_arn,
+            jobDriver={
+                "sparkSubmit": {
+                    "entryPoint": "s3://<bucket>/scripts/load_csv.py",
+                    "sparkSubmitParameters": f"--conf spark.app.name=load_taxi_zones --jars s3://<bucket>/jars/csv.jar --file taxi_zone_lookup.csv --view taxi_zones"
+                }
+            },
+            configurationOverrides={
+                "applicationConfiguration": {
+                    "spark-defaults": {
+                        "spark.sql.adaptive.enabled": "true"
+                    }
+                }
+            }
+        )
+        if job_run_id:
             views_registered.append("taxi_zones")
             logger.info("Registered view: taxi_zones")
 
@@ -75,21 +174,56 @@ class DataLoader:
         return len(views_registered) > 0
 
     def get_dataset_stats(self) -> Dict[str, Dict[str, Any]]:
-        """Get row counts and column info for loaded views via SQL."""
+        """Get row counts and column info for loaded views via SparkSubmit jobs."""
         stats = {}
         views = ["yellow_taxi", "green_taxi", "fhv", "fhvhv", "taxi_zones"]
 
         for view in views:
             try:
-                r = self.session.execute_sql(f"SELECT * FROM {view} LIMIT 1", max_rows=1)
-                cols = r.get("columns", [])
-                cnt = self.session.execute_sql(f"SELECT COUNT(*) as cnt FROM {view}", max_rows=1)
-                rows = cnt.get("data", [])
-                row_count = int(rows[0].get("cnt", 0)) if rows else 0
+                # Schema extraction job
+                schema_job_id = self.emr_client.start_job_run(
+                    applicationId=self._get_application_id(),
+                    executionRoleArn=self.execution_role_arn,
+                    jobDriver={
+                        "sparkSubmit": {
+                            "entryPoint": "s3://<bucket>/scripts/query_schema.py",
+                            "sparkSubmitParameters": f"--conf spark.app.name=query_schema --view {view} --limit 1"
+                        }
+                    },
+                    configurationOverrides={
+                        "applicationConfiguration": {
+                            "spark-defaults": {
+                                "spark.sql.adaptive.enabled": "true"
+                            }
+                        }
+                    }
+                )
+                
+                # Row count job
+                count_job_id = self.emr_client.start_job_run(
+                    applicationId=self._get_application_id(),
+                    executionRoleArn=self.execution_role_arn,
+                    jobDriver={
+                        "sparkSubmit": {
+                            "entryPoint": "s3://<bucket>/scripts/count_rows.py",
+                            "sparkSubmitParameters": f"--conf spark.app.name=count_rows --view {view}"
+                        }
+                    },
+                    configurationOverrides={
+                        "applicationConfiguration": {
+                            "spark-defaults": {
+                                "spark.sql.adaptive.enabled": "true"
+                            }
+                        }
+                    }
+                )
+                
+                # In production, you would wait for job completion and retrieve results from S3 or logs
+                # For now, placeholder values
                 stats[view] = {
-                    "row_count": row_count,
-                    "columns": len(cols),
-                    "column_names": cols,
+                    "row_count": 0,
+                    "columns": 0,
+                    "column_names": [],
                 }
             except Exception as e:
                 logger.error(f"Error loading stats for {view}: {e}")

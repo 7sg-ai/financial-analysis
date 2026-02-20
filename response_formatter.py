@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 import json
 from datetime import datetime, date
 from decimal import Decimal
-from tabulate import tabulate
+from tabulate import tabulate  # Ensure included in AWS Lambda layer or requirements.txt
 import logging
 
 logger = logging.getLogger(__name__)

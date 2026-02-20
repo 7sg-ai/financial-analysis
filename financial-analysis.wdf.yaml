@@ -16,7 +16,7 @@ secrets:
   secretRefs:
   - name: openai-endpoint
     injectAs: env
-    envVar: AZURE_OPENAI_ENDPOINT
+    envVar: AWS_BEDROCK_REGION
     externalRef:
       provider: vault
       key: secret/financial-analysis/openai/endpoint
@@ -26,7 +26,7 @@ secrets:
     externalRef:
       provider: vault
       key: secret/financial-analysis/openai/api-key
-  - name: synapse-spark-pool-name
+  - name: emr-application-id
     injectAs: env
     envVar: SYNAPSE_SPARK_POOL_NAME
     externalRef:
@@ -44,13 +44,13 @@ secrets:
     externalRef:
       provider: vault
       key: secret/financial-analysis/azure/subscription-id
-  - name: azure-resource-group
+  - name: aws-region
     injectAs: env
     envVar: AZURE_RESOURCE_GROUP
     externalRef:
       provider: vault
       key: secret/financial-analysis/azure/resource-group
-  - name: storage-account-name
+  - name: s3-bucket-name
     injectAs: env
     envVar: AZURE_STORAGE_ACCOUNT_NAME
     externalRef:
@@ -86,7 +86,7 @@ dataSources:
     dsdfRef: dsdf/downloaded-taxi-data.dsdf.202602191817.yaml
   - name: taxi-zone-lookup
     dsdfRef: dsdf/taxi-zone-lookup.dsdf.202602191817.yaml
-  - name: azure-synapse-spark
+  - name: aws-emr-serverless
     dsdfRef: dsdf/azure-synapse-spark.dsdf.202602191817.yaml
   - name: llm-endpoint
     dsdfRef: dsdf/llm-endpoint.dsdf.202602191817.yaml
@@ -99,8 +99,7 @@ dataSources:
   outputs: []
 scenarios:
   native:
-    description: 'Azure-native deployment: containers on AKS; data on ADLS Gen2; compute
-      on Synapse Spark; LLM on Azure OpenAI.'
+    description: 'AWS-native deployment: containers on EKS; data on S3; compute on EMR Serverless; LLM on Amazon Bedrock.'
     topology:
       components:
       - &id001

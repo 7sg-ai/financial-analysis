@@ -3,6 +3,7 @@ LLM-powered query generation module using AWS Bedrock
 Converts natural language questions into Spark SQL queries
 """
 from typing import Optional, Dict, List, Any, Literal
+import os
 import boto3
 import json
 import logging
@@ -20,7 +21,7 @@ class QueryGenerator:
     
     def __init__(
         self,
-        aws_region: str = "us-east-1",
+        aws_region: str = os.getenv("AWS_REGION", "us-east-1"),
         model_id: str = "meta.llama3-1-8b-instruct-v1:0"
     ):
         """

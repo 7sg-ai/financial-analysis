@@ -51,10 +51,10 @@ class SynapseSparkSession:
         self._emr_client = boto3.client('emr-serverless', region_name=aws_region)
         self.emr_application_id = emr_application_id
         self.emr_execution_role_arn = emr_execution_role_arn
-        self.data_path = data_path.rstrip("/")
+        self.data_path = data_path.rstrip("/").replace("abfss://", "s3a://")
         self._session_id: Optional[str] = None
-        self._storage_account = storage_account
-        self._storage_key = storage_key
+        self._storage_account = None
+        self._storage_key = None
 
     def connect(self) -> None:
         """Create an EMR Serverless Spark job run."""
@@ -64,7 +64,7 @@ class SynapseSparkSession:
 
         conf: Dict[str, str] = {}
         if self._storage_account and self._storage_key:
-            # For S3 access, use IAM roles instead of keys; this is kept for compatibility
+            # For S3 access, use IAM roles (recommended) or temporary credentials via STS
             logger.info(f"Configured Spark for S3: {self._storage_account}")
 
         # Dynamic executor allocation: scale executors based on query complexity.

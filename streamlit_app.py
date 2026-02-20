@@ -13,6 +13,8 @@ import logging
 from typing import Dict, Any, List, Optional
 import os
 import requests
+import boto3
+import os
 
 # Configure logging - set to DEBUG for troubleshooting
 logging.basicConfig(
@@ -74,10 +76,10 @@ st.markdown("""
 # Initialize session state
 # Always read API_URL from environment variable (can change between restarts)
 # This ensures the app uses the latest environment variable value
-env_api_url = os.getenv("API_URL", "http://localhost:8000")
+env_api_url = os.getenv("API_URL", "https://<api-id>.execute-api.<region>.amazonaws.com/prod")
 if 'api_url' not in st.session_state or st.session_state.api_url != env_api_url:
     # Update session state if environment variable changed or not set
-    st.session_state.api_url = env_api_url
+    st.session_state.api_url = env_api_url if env_api_url.startswith('http') else f"https://{os.getenv('AWS_API_HOST', '<api-id>.execute-api.<region>.amazonaws.com')}/prod"
     logger.info(f"API URL set from environment: {env_api_url}")
     # Reset API availability when URL changes
     if 'api_url' in st.session_state and st.session_state.api_url != env_api_url:
@@ -97,7 +99,10 @@ logger.info(f"Using API URL: {st.session_state.api_url} (from env: {env_api_url}
 def check_api_health():
     """Check if the API backend is available"""
     try:
-        response = requests.get(f"{st.session_state.api_url}/health", timeout=5.0)
+        response = import boto3
+session = boto3.Session()
+client = session.client('apigatewaymanagementapi', endpoint_url=st.session_state.api_url.replace('https://', '').split('/')[0]) if 'execute-api' in st.session_state.api_url else None
+# For non-API Gateway, use requests as-is; for API Gateway, sign with SigV4 or use API key header
         st.session_state.api_available = response.status_code == 200
         return st.session_state.api_available
     except Exception as e:

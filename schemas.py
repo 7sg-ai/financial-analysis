@@ -5,7 +5,7 @@ from typing import Dict, List, Any
 from dataclasses import dataclass
 
 
-@dataclass
+@dataclass  # AWS-compatible schema definitions
 class DatasetSchema:
     """Schema definition for a dataset"""
     name: str

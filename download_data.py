@@ -38,7 +38,10 @@ Upload to Amazon S3 (for EMR Serverless/Redshift):
     Set these environment variables before using --upload:
     - AWS_ACCESS_KEY_ID
     - AWS_SECRET_ACCESS_KEY
-    - AWS_S3_BUCKET (or SYNAPSE_FILE_SYSTEM, default: data)
+    - AWS_DEFAULT_REGION (default: us-east-1)
+    - S3_BUCKET (default: data)
+    - AWS_SECRET_ACCESS_KEY
+    - AWS_S3_BUCKET (default: data)
     - AWS_REGION (default: us-east-1)
     
     After upload, set DATA_PATH to: s3a://<bucket>/<storage-path>/
@@ -70,6 +73,7 @@ import logging
 import argparse
 import time
 import json
+import boto3
 from typing import Optional, Tuple
 
 # Configure logging
@@ -103,7 +107,8 @@ def download_file(url: str, filepath: Path, retries: int = 3) -> bool:
             
             # Check for 403 Forbidden specifically (data not available)
             if response.status_code == 403:
-                logger.warning(f"⚠️  Access forbidden (403) for {filepath.name} - data may not be publicly available")
+                logger.warning(f"403 Forbidden for {url} — file may not exist or access denied.")
+                return Falseing(f"⚠️  Access forbidden (403) for {filepath.name} - data may not be publicly available")
                 return False
             
             # Check for 404 Not Found (file doesn't exist)

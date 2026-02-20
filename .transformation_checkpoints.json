@@ -1,0 +1,85 @@
+{
+  "checkpoints": [
+    {
+      "id": 1,
+      "file": "config.py",
+      "commit_hash": "f99df2c221a6c13f734ed809fdca182e7a072c71",
+      "description": "Translated Azure\u2192AWS: config.py",
+      "timestamp": "2026-02-20T19:17:21.716662",
+      "metadata": {}
+    },
+    {
+      "id": 2,
+      "file": "data_loader.py",
+      "commit_hash": "283a0676012f923759fc21bc527219d2cddf9d24",
+      "description": "Translated Azure\u2192AWS: data_loader.py",
+      "timestamp": "2026-02-20T19:17:49.069662",
+      "metadata": {}
+    },
+    {
+      "id": 3,
+      "file": "query_executor.py",
+      "commit_hash": "902b463fd53ca0bb017c83747a8c3da2bf36999c",
+      "description": "Translated Azure\u2192AWS: query_executor.py",
+      "timestamp": "2026-02-20T19:18:18.263083",
+      "metadata": {}
+    },
+    {
+      "id": 4,
+      "file": "analysis_engine.py",
+      "commit_hash": "2aaae5543a783e7a5d0efa3635a7b247647ce182",
+      "description": "Translated Azure\u2192AWS: analysis_engine.py",
+      "timestamp": "2026-02-20T19:18:53.684943",
+      "metadata": {}
+    },
+    {
+      "id": 5,
+      "file": "synapse_client.py",
+      "commit_hash": "55f7bf29da7d0023d22cd052399cadc33b61067f",
+      "description": "Translated Azure\u2192AWS: synapse_client.py",
+      "timestamp": "2026-02-20T19:19:29.100622",
+      "metadata": {}
+    },
+    {
+      "id": 6,
+      "file": "generate_taxi_questions.py",
+      "commit_hash": "9a9e0200107fb992a09fb3e32d3588f9b54fa771",
+      "description": "Translated Azure\u2192AWS: generate_taxi_questions.py",
+      "timestamp": "2026-02-20T19:20:26.579460",
+      "metadata": {}
+    },
+    {
+      "id": 7,
+      "file": "llm_query_generator.py",
+      "commit_hash": "196d575ef4eef65153ca48a3908ba7f29dfff939",
+      "description": "Translated Azure\u2192AWS: llm_query_generator.py",
+      "timestamp": "2026-02-20T19:21:59.950254",
+      "metadata": {}
+    },
+    {
+      "id": 8,
+      "file": "download_data.py",
+      "commit_hash": "508e3ca1e5e9b9b8b054bfff2b338979412ad593",
+      "description": "Translated Azure\u2192AWS: download_data.py",
+      "timestamp": "2026-02-20T19:23:00.646067",
+      "metadata": {}
+    },
+    {
+      "id": 9,
+      "file": "streamlit_app.py",
+      "commit_hash": "3c794d093fd69b666c3540854b3d35ddf9330e59",
+      "description": "Translated Azure\u2192AWS: streamlit_app.py",
+      "timestamp": "2026-02-20T19:23:58.625603",
+      "metadata": {}
+    },
+    {
+      "id": 10,
+      "file": "generate_taxi_questions_jan.py",
+      "commit_hash": "a1556e3cb4c8b2c74e9e42aa29b6db390d0c06c6",
+      "description": "Translated Azure\u2192AWS: generate_taxi_questions_jan.py",
+      "timestamp": "2026-02-20T19:25:09.018320",
+      "metadata": {}
+    }
+  ],
+  "last_updated": "2026-02-20T19:25:09.027765"
+}

@@ -10,7 +10,7 @@ from datetime import datetime
 
 # API Gateway endpoint (replaces Azure Container App)
 # Replace with your deployed API Gateway URL after migration
-API_BASE_URL = "https://<your-api-id>.execute-api.<region>.amazonaws.com/prod/api/analyze"
+API_BASE_URL = os.getenv('API_BASE_URL', 'https://<your-api-id>.execute-api.<region>.amazonaws.com/prod/api/analyze')
 
 # Categories of questions
 QUESTION_TEMPLATES = [

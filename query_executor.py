@@ -8,6 +8,7 @@ import re
 import json
 from datetime import datetime
 import traceback
+import os
 
 import boto3
 from botocore.exceptions import ClientError
@@ -28,12 +29,12 @@ class QueryExecutor:
     Executes Spark SQL queries in AWS EMR Serverless via Livy-compatible wrapper.
     """
 
-    def __init__(self, region_name: str = "us-east-1", execution_role_arn: str = None, max_result_rows: int = 1000):
+    def __init__(self, region_name: str = "us-east-1", execution_role_arn: str = os.getenv("EMR_EXECUTION_ROLE_ARN"), max_result_rows: int = 1000):
         self.client = boto3.client("emr-serverless", region_name=region_name)
         self.execution_role_arn = execution_role_arn
         self.max_result_rows = max_result_rows
         self._query_history: List[Dict[str, Any]] = []
-        self.application_id = None  # Set via setup or configuration
+        self.application_id = os.getenv("EMR_SERVERLESS_APPLICATION_ID")
         logger.info(f"QueryExecutor initialized (EMR Serverless) max_result_rows={max_result_rows}")
 
     def execute_query(
@@ -71,7 +72,7 @@ class QueryExecutor:
                 executionRoleArn=self.execution_role_arn,
                 jobDriver={
                     "sparkSubmit": {
-                        "entryPoint": "s3://<bucket>/livy-wrapper.py",
+                        "entryPoint": os.getenv("LIVY_WRAPPER_S3_PATH", "s3://<bucket>/livy-wrapper.py"),
                         "sparkSubmitParameters": f"--conf spark.livy.sql.query={query} --conf spark.livy.sql.maxRows={limit}"
                     }
                 },

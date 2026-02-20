@@ -24,16 +24,24 @@ class DataLoader:
         """Get default execution role ARN from environment (e.g., EC2 instance profile or Lambda role)."""
         # This is a placeholder implementation. In production, use boto3 to retrieve the role
         # attached to the current environment (e.g., via IAM instance profile or Lambda context).
-        raise NotImplementedError(
-            "Default execution role ARN not configured. Please provide execution_role_arn explicitly."
-        )
+        session = boto3.Session()
+        iam_client = session.client('iam')
+        try:
+            role_name = session.resource('iam').Role('EMRServerlessExecutionRole').name
+            return session.resource('iam').Role(role_name).arn
+        except Exception:
+            raise RuntimeError(
+                "Default execution role ARN not found. Ensure IAM role 'EMRServerlessExecutionRole' exists or set EXECUTION_ROLE_ARN environment variable."
+            )
 
     def _get_application_id(self) -> str:
         """Get EMR Serverless application ID. In production, this should be retrieved from config or environment."""
         # This is a placeholder implementation. In production, retrieve from environment variable or config.
-        raise NotImplementedError(
-            "EMR Serverless application ID not configured. Please set EMR_APPLICATION_ID environment variable."
-        )
+        import os
+        app_id = os.getenv('EMR_APPLICATION_ID')
+        if not app_id:
+            raise ValueError("EMR_APPLICATION_ID environment variable must be set.")
+        return app_id
 
     def clear_cache(self) -> None:
         """No-op for EMR Serverless (views are server-side); kept for API compatibility."""
@@ -63,7 +71,7 @@ class DataLoader:
             executionRoleArn=self.execution_role_arn,
             jobDriver={
                 "sparkSubmit": {
-                    "entryPoint": "s3://<bucket>/scripts/load_parquet.py",
+                    "entryPoint": "s3://{}/scripts/load_parquet.py'.format(os.getenv('S3_BUCKET', 'data'))",
                     "sparkSubmitParameters": f"--conf spark.app.name=load_yellow_taxi --jars s3://<bucket>/jars/parquet.jar --pattern {pattern} --view yellow_taxi --months {','.join(months) if months else ''}"
                 }
             },
@@ -86,7 +94,7 @@ class DataLoader:
             jobDriver={
                 "sparkSubmit": {
                     "entryPoint": "s3://<bucket>/scripts/load_parquet.py",
-                    "sparkSubmitParameters": f"--conf spark.app.name=load_green_taxi --jars s3://<bucket>/jars/parquet.jar --pattern {pattern} --view green_taxi --months {','.join(months) if months else ''}"
+                    "sparkSubmitParameters": f"--conf spark.app.name=load_green_taxi --jars s3://{os.getenv('S3_BUCKET', 'data')}/jars/parquet.jar --pattern {pattern} --view green_taxi --months {','.join(months) if months else ''}"ttern} --view green_taxi --months {','.join(months) if months else ''}"
                 }
             },
             configurationOverrides={

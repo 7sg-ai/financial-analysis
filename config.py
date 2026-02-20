@@ -13,10 +13,13 @@ class Settings(BaseSettings):
     # AWS Bedrock Configuration
     aws_region: str = Field(..., env="AWS_REGION")
     aws_access_key_id: Optional[str] = Field(default=None, env="AWS_ACCESS_KEY_ID")
+    aws_session_token: Optional[str] = Field(default=None, env="AWS_SESSION_TOKEN")  # Prefer IAM roles over keys in production
     bedrock_model_id: str = Field(default="meta.llama3-2-3b-instruct-v1:0", env="BEDROCK_MODEL_ID")
     
     # AWS EMR Serverless Configuration (Required)
+    emr_execution_role_arn: str = Field(..., env="EMR_EXECUTION_ROLE_ARN")
     emr_application_id: str = Field(..., env="EMR_APPLICATION_ID")
+    aws_secret_access_key: Optional[str] = Field(default=None, env="AWS_SECRET_ACCESS_KEY")
     aws_account_id: str = Field(..., env="AWS_ACCOUNT_ID")
     
     # AWS S3 Configuration

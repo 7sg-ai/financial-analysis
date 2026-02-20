@@ -11,7 +11,7 @@ from datetime import datetime
 
 # AWS API Gateway endpoint (replaces Azure Container Instance)
 # Replace with your deployed API Gateway invoke URL
-API_BASE_URL = "https://<your-api-id>.execute-api.<region>.amazonaws.com/prod"
+API_BASE_URL = "https://<your-api-id>.execute-api.{region}.amazonaws.com/prod"
 
 # Categories of questions - filtered for January 2024 only
 QUESTION_TEMPLATES = [

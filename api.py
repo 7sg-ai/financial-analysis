@@ -83,7 +83,7 @@ settings = get_settings()
 app = FastAPI(
     title=settings.api_title,
     version=settings.api_version,
-    description="Interactive financial analysis API using Azure Synapse Spark and Azure OpenAI",
+    description="Interactive financial analysis API using AWS EMR Serverless and Amazon Bedrock",
     lifespan=lifespan
 )
 

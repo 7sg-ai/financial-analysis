@@ -6,6 +6,7 @@ from typing import Optional, Dict, List, Any, Literal
 from openai import AzureOpenAI
 import json
 import logging
+import re
 from tenacity import retry, stop_after_attempt, wait_exponential
 from schemas import get_schema_context
 
@@ -150,10 +151,18 @@ class QueryGenerator:
         
         query_upper = query.upper()
         
-        # Check for dangerous operations
-        dangerous_keywords = ['DROP', 'DELETE', 'TRUNCATE', 'ALTER', 'CREATE', 'INSERT', 'UPDATE']
-        for keyword in dangerous_keywords:
-            if keyword in query_upper:
+        # Check for dangerous operations (use word boundaries so identifiers like "dropoff" are allowed)
+        dangerous_patterns = [
+            (r'\bDROP\b', 'DROP'),
+            (r'\bDELETE\b', 'DELETE'),
+            (r'\bTRUNCATE\b', 'TRUNCATE'),
+            (r'\bALTER\b', 'ALTER'),
+            (r'\bCREATE\b', 'CREATE'),
+            (r'\bINSERT\b', 'INSERT'),
+            (r'\bUPDATE\b', 'UPDATE'),
+        ]
+        for pattern, keyword in dangerous_patterns:
+            if re.search(pattern, query_upper):
                 issues.append(f"Query contains potentially dangerous keyword: {keyword}")
         
         # Check for common issues

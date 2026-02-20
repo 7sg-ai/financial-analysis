@@ -10,22 +10,17 @@ import os
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
     
-    # Azure OpenAI Configuration
-    azure_openai_endpoint: str = Field(..., env="AZURE_OPENAI_ENDPOINT")
-    azure_openai_api_key: str = Field(..., env="AZURE_OPENAI_API_KEY")
-    azure_openai_deployment_name: str = Field(default="gpt-5.2-chat", env="AZURE_OPENAI_DEPLOYMENT_NAME")
-    azure_openai_api_version: str = Field(default="2024-12-01-preview", env="AZURE_OPENAI_API_VERSION")
+    # Crusoe Managed Inference Configuration
+    crusoe_inference_endpoint: str = Field(default="https://inference.api.crusoecloud.com/v1", env="CRUSOE_INFERENCE_ENDPOINT")
+    crusoe_api_key: str = Field(..., env="CRUSOE_API_KEY")
+    crusoe_model_id: str = Field(default="meta-llama/Meta-Llama-3.1-8B-Instruct", env="CRUSOE_MODEL_ID")
     
-    # Azure Synapse Configuration (Required)
-    synapse_spark_pool_name: str = Field(..., env="SYNAPSE_SPARK_POOL_NAME")
-    synapse_workspace_name: str = Field(..., env="SYNAPSE_WORKSPACE_NAME")
-    azure_subscription_id: str = Field(..., env="AZURE_SUBSCRIPTION_ID")
-    azure_resource_group: str = Field(..., env="AZURE_RESOURCE_GROUP")
+    # EMR Serverless Configuration (Required)
+    emr_application_id: str = Field(..., env="EMR_APPLICATION_ID")
+    aws_account_id: str = Field(..., env="AWS_ACCOUNT_ID")
     
-    # Azure Storage Configuration
-    azure_storage_account_name: Optional[str] = Field(default=None, env="AZURE_STORAGE_ACCOUNT_NAME")
-    azure_storage_account_key: Optional[str] = Field(default=None, env="AZURE_STORAGE_ACCOUNT_KEY")
-    azure_storage_container: Optional[str] = Field(default=None, env="AZURE_STORAGE_CONTAINER")
+    # Persistent Disk Configuration (replaces Azure Storage)
+    persistent_disk_path: Optional[str] = Field(default=None, env="PERSISTENT_DISK_PATH")
     
     # Application Configuration
     data_path: str = Field(default="./src_data", env="DATA_PATH")
@@ -53,4 +48,3 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get application settings instance"""
     return Settings()
-

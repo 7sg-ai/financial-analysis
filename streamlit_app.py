@@ -201,7 +201,15 @@ def display_results(results: Dict[str, Any]):
     
     if not results.get('results'):
         logger.warning(f"display_results: results.get('results') is empty. Full results dict: {results}")
-        st.warning("No results to display")
+        validation_errors = results.get('metadata', {}).get('validation_errors', [])
+        is_security_rejection = any(
+            'dangerous keyword' in str(e).lower() or 'forbidden operation' in str(e).lower()
+            for e in validation_errors
+        )
+        if is_security_rejection:
+            st.error("Query was stopped due to security concerns with the SQL statement")
+        else:
+            st.warning("No results to display")
         logger.debug(f"Results structure: {json.dumps(results, indent=2, default=str)}")
         return
     

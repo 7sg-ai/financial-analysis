@@ -4,6 +4,7 @@ Executes queries remotely in Synapse; no local Spark.
 """
 from typing import Dict, List, Any, Optional, TYPE_CHECKING
 import logging
+import re
 from datetime import datetime
 import traceback
 
@@ -102,9 +103,19 @@ class QueryExecutor:
         """Validate (basic checks) and optionally execute."""
         result = {"valid": False, "validation_errors": [], "execution_result": None}
         q = query.upper().strip()
-        for op in ["DROP", "DELETE", "TRUNCATE", "ALTER", "CREATE TABLE", "INSERT", "UPDATE"]:
-            if op in q:
-                result["validation_errors"].append(f"Forbidden operation: {op}")
+        # Use word boundaries so identifiers like "dropoff" or "tpep_dropoff_datetime" are allowed
+        forbidden_ops = [
+            (r"\bDROP\b", "DROP"),
+            (r"\bDELETE\b", "DELETE"),
+            (r"\bTRUNCATE\b", "TRUNCATE"),
+            (r"\bALTER\b", "ALTER"),
+            (r"\bCREATE\s+TABLE\b", "CREATE TABLE"),
+            (r"\bINSERT\b", "INSERT"),
+            (r"\bUPDATE\b", "UPDATE"),
+        ]
+        for pattern, op_name in forbidden_ops:
+            if re.search(pattern, q):
+                result["validation_errors"].append(f"Forbidden operation: {op_name}")
                 return result
         if not (q.startswith("SELECT") or q.startswith("WITH")):
             result["validation_errors"].append("Query must be SELECT or CTE")

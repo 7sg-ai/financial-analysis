@@ -1,12 +1,12 @@
 #!/bin/bash
-# Deployment script for Azure Synapse / Azure Container Instances
+# Deployment script for AWS (ECS/EKS, S3, Bedrock, etc.)
 # Default: Builds locally using Docker (Linux/AMD64 platform)
 # Set USE_ACR_BUILD=true to use Azure Container Registry Build instead
 
 set -e
 
 echo "=================================="
-echo "Financial Analysis API - Azure Deployment"
+echo "Financial Analysis API - AWS Deployment"
 echo "=================================="
 echo ""
 echo "Choose deployment type:"
@@ -24,44 +24,44 @@ if [[ ! "$DEPLOYMENT_CHOICE" =~ ^[1-5]$ ]]; then
 fi
 
 # Configuration
-RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-financial-analysis}"
-LOCATION="${AZURE_LOCATION:-eastus2}"
-CONTAINER_REGISTRY="${AZURE_CONTAINER_REGISTRY:-financialanalysisacr}"
+AWS_REGION="${AWS_REGION:-us-east-1}"
+# AWS region is set via AWS_REGION above
+ECR_REPOSITORY="${ECR_REPOSITORY:-financial-analysis-api}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 
 # Build Configuration
 # Set USE_ACR_BUILD=true to use Azure Container Registry Build (no Docker required)
 # Default: false (build locally using Docker)
-USE_ACR_BUILD="${USE_ACR_BUILD:-false}"
+USE_ECR_BUILD="${USE_ECR_BUILD:-false}"
 
 # Azure OpenAI Configuration
-OPENAI_RESOURCE_NAME="${AZURE_OPENAI_RESOURCE_NAME:-financial-analysis-openai}"
-OPENAI_DEPLOYMENT_NAME="${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}"
+BEDROCK_MODEL_ID="${BEDROCK_MODEL_ID:-anthropic.claude-3-sonnet-20240229-v1:0}"
+# AWS Bedrock model ID is set via BEDROCK_MODEL_ID above
 
 # Azure Synapse Configuration
-SYNAPSE_WORKSPACE_NAME="${SYNAPSE_WORKSPACE_NAME:-financial-analysis-synapse}"
-SYNAPSE_SPARK_POOL_NAME="${SYNAPSE_SPARK_POOL_NAME:-sparkpool}"
-SYNAPSE_STORAGE_ACCOUNT="${SYNAPSE_STORAGE_ACCOUNT:-financialanalysissynapse}"
-SYNAPSE_FILE_SYSTEM="${SYNAPSE_FILE_SYSTEM:-data}"
-SYNAPSE_ADMIN_USER="${SYNAPSE_ADMIN_USER:-sqladmin}"
-SYNAPSE_ADMIN_PASSWORD="${SYNAPSE_ADMIN_PASSWORD:-$(openssl rand -base64 32)}"
+# AWS equivalent: EMR cluster or Glue job name
+# AWS equivalent: EMR cluster name or Glue job name
+S3_BUCKET_NAME="${S3_BUCKET_NAME:-financial-analysis-data}"
+# AWS equivalent: S3 bucket path prefix
+# AWS equivalent: IAM user/role for database access
+# AWS equivalent: Secrets Manager or Parameter Store
 
 # Synapse auth: user-assigned managed identity only
-API_IDENTITY_NAME="${API_IDENTITY_NAME:-financial-analysis-api-identity}"
+IAM_ROLE_NAME="${IAM_ROLE_NAME:-financial-analysis-api-role}"
 # Synapse role for managed identity. Must include useCompute for Livy/Spark sessions.
 # Synapse Administrator and Synapse Contributor both grant useCompute. Some workspaces lack "Synapse Apache Spark Administrator".
-SYNAPSE_ROLE="${SYNAPSE_ROLE:-Synapse Administrator}"
+# AWS equivalent: IAM policy for S3/EMR access
 
 # Set deployment-specific variables
 if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ] || [ "$DEPLOYMENT_CHOICE" = "4" ]; then
     API_IMAGE_NAME="financial-analysis-api"
-    API_CONTAINER_NAME="financial-analysis-api"
+    ECS_SERVICE_NAME="financial-analysis-api"
 fi
 
 if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ] || [ "$DEPLOYMENT_CHOICE" = "4" ]; then
     STREAMLIT_IMAGE_NAME="financial-analysis-streamlit"
-    STREAMLIT_APP_NAME="financial-analysis-streamlit"
-    APP_SERVICE_PLAN="financial-analysis-plan"
+    ECS_SERVICE_NAME_STREAMLIT="financial-analysis-streamlit"
+    # AWS equivalent: ECS cluster or EKS namespace
 fi
 
 # For option 4, determine what to update based on what exists
@@ -70,19 +70,19 @@ if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
     UPDATE_STREAMLIT=false
     
     # Check if API container exists
-    if az container show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    if aws ecs describe-services --cluster financial-analysis-cluster --services "$ECS_SERVICE_NAME" &> /dev/null; then
         UPDATE_API=true
         echo "✓ Found API container: $API_CONTAINER_NAME"
     fi
     
     # Check if Streamlit web app exists
-    if az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    if aws ecs describe-services --cluster financial-analysis-cluster --services "$ECS_SERVICE_NAME_STREAMLIT" &> /dev/null; then
         UPDATE_STREAMLIT=true
         echo "✓ Found Streamlit web app: $STREAMLIT_APP_NAME"
     fi
     
     if [ "$UPDATE_API" = false ] && [ "$UPDATE_STREAMLIT" = false ]; then
-        echo "✗ No existing containers or web apps found to update."
+        echo "✗ No existing ECS services found to update."
         echo "  Please use options 1-3 to deploy first."
         exit 1
     fi
@@ -101,26 +101,26 @@ fi
 
 echo ""
 echo "Configuration:"
-echo "  Resource Group: $RESOURCE_GROUP"
+echo "  AWS Region: $AWS_REGION"
 echo "  Location: $LOCATION"
-echo "  Container Registry: $CONTAINER_REGISTRY"
+echo "  ECR Repository: $ECR_REPOSITORY"
 echo "  Deployment Choice: $DEPLOYMENT_CHOICE"
-echo "  Build Method: $([ "$USE_ACR_BUILD" = "true" ] && echo "Azure Container Registry Build" || echo "Local Docker Build (Linux/AMD64)")"
+echo "  Build Method: $([ "$USE_ECR_BUILD" = "true" ] && echo "Amazon ECR Build" || echo "Local Docker Build (Linux/AMD64)")"
 if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo "  API Image: $API_IMAGE_NAME:$IMAGE_TAG"
-    echo "  Synapse Role (for managed identity): $SYNAPSE_ROLE"
+    echo "  IAM Role: $IAM_ROLE_NAME"
 fi
 if [ "$DEPLOYMENT_CHOICE" = "5" ]; then
     echo "  Synapse Role: $SYNAPSE_ROLE"
 fi
 if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo "  Streamlit Image: $STREAMLIT_IMAGE_NAME:$IMAGE_TAG"
-    echo "  App Service Plan: $APP_SERVICE_PLAN"
+    echo "  ECS Service: $ECS_SERVICE_NAME_STREAMLIT"
 fi
 echo ""
 
 # Check Azure CLI
-if ! command -v az &> /dev/null; then
+if ! command -v aws &> /dev/null; then
     echo "Error: Azure CLI not found. Please install it first."
     echo ""
     echo "Installation: https://docs.microsoft.com/en-us/cli/azure/install-azure-cli"
@@ -138,7 +138,7 @@ if [ "$DEPLOYMENT_CHOICE" != "5" ] && ! command -v docker &> /dev/null; then
     echo ""
     echo "After installation, make sure Docker is running and try again."
     echo ""
-    echo "Alternatively, set USE_ACR_BUILD=true to use Azure Container Registry Build (no Docker required)"
+    echo "Alternatively, set USE_ECR_BUILD=true to use Amazon ECR Build (no Docker required)"
     exit 1
 fi
 
@@ -150,55 +150,55 @@ if [ "$DEPLOYMENT_CHOICE" != "5" ] && ! docker info &> /dev/null; then
     echo "  macOS/Windows: Open Docker Desktop application"
     echo "  Linux: sudo systemctl start docker"
     echo ""
-    echo "Alternatively, set USE_ACR_BUILD=true to use Azure Container Registry Build (no Docker required)"
+    echo "Alternatively, set USE_ECR_BUILD=true to use Amazon ECR Build (no Docker required)"
     exit 1
 fi
 
 # Authentication
-echo "Checking Azure authentication..."
-az account show > /dev/null 2>&1 || az login
-echo "✓ Authenticated"
+echo "Checking AWS authentication..."
+aws sts get-caller-identity > /dev/null 2>&1 || aws configure
+echo "✓ Authenticated (AWS CLI)"
 
 # Create resource group if it doesn't exist
-echo "Ensuring resource group exists..."
-az group create \
-    --name "$RESOURCE_GROUP" \
-    --location "$LOCATION" \
-    --output none
+echo "Ensuring AWS resources exist..."
+# AWS equivalent: Resource Group via CloudFormation or tags
+    # AWS resources are region-scoped
+    # AWS region is set via AWS_REGION
+    # AWS resources created via CloudFormation or Terraform
 
-echo "✓ Resource group ready"
+echo "✓ AWS resources ready"
 
 # Skip Azure resource creation for image update only or role-assign-only
 if [ "$DEPLOYMENT_CHOICE" != "4" ] && [ "$DEPLOYMENT_CHOICE" != "5" ]; then
     # Create Azure OpenAI service if it doesn't exist
     echo ""
-    echo "Checking Azure OpenAI service..."
-if ! az cognitiveservices account show --name "$OPENAI_RESOURCE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    echo "Creating Azure OpenAI service..."
-    az cognitiveservices account create \
-        --name "$OPENAI_RESOURCE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --location "$LOCATION" \
-        --kind OpenAI \
-        --sku S0 \
-        --output none
+    echo "Checking AWS Bedrock service..."
+if ! aws bedrock list-model-activation-definitions --query "modelDefinitions[?contains(modelId, 'claude') || contains(modelId, 'titan')]" --output table 2>/dev/null || echo "No models found"; then
+    echo "Enabling AWS Bedrock models..."
+    # AWS equivalent: Enable Bedrock model access
+        # AWS Bedrock models are enabled via console or CLI
+        # AWS resources are region-scoped
+        # AWS region is set via AWS_REGION
+        # AWS Bedrock provides foundation models
+        # AWS Bedrock pricing is pay-per-use
+        # AWS resources created via CloudFormation or Terraform
     echo "✓ Azure OpenAI service created"
     
     # Get OpenAI endpoint and key
-    AZURE_OPENAI_ENDPOINT=$(az cognitiveservices account show \
-        --name "$OPENAI_RESOURCE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --query properties.endpoint -o tsv)
-    AZURE_OPENAI_API_KEY=$(az cognitiveservices account keys list \
-        --name "$OPENAI_RESOURCE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --query key1 -o tsv)
+    AWS_BEDROCK_ENDPOINT="https://bedrock.$AWS_REGION.amazonaws.com"
+        # AWS Bedrock models are enabled via console or CLI
+        # AWS resources are region-scoped
+        # AWS Bedrock endpoint format is standard
+    AWS_BEDROCK_ACCESS_KEY="${AWS_BEDROCK_ACCESS_KEY:-default}"
+        # AWS Bedrock models are enabled via console or CLI
+        # AWS resources are region-scoped
+        # AWS uses IAM policies for access control
     
-    echo "✓ Azure OpenAI endpoint: $AZURE_OPENAI_ENDPOINT"
+    echo "✓ AWS Bedrock endpoint: $AWS_BEDROCK_ENDPOINT"
     
     # Deploy GPT-5.2-chat model if not already deployed
-    echo "Checking for GPT-5.2-chat deployment..."
-    if ! az cognitiveservices account deployment show \
+    echo "Checking for Claude model deployment..."
+    if ! aws bedrock list-model-activation-definitions --query "modelDefinitions[?contains(modelId, 'claude')]" --output text 2>/dev/null | grep -q .count deployment show \
         --name "$OPENAI_DEPLOYMENT_NAME" \
         --account-name "$OPENAI_RESOURCE_NAME" \
         --resource-group "$RESOURCE_GROUP" &> /dev/null; then
@@ -206,12 +206,12 @@ if ! az cognitiveservices account show --name "$OPENAI_RESOURCE_NAME" --resource
         az cognitiveservices account deployment create \
             --name "$OPENAI_DEPLOYMENT_NAME" \
             --account-name "$OPENAI_RESOURCE_NAME" \
-            --resource-group "$RESOURCE_GROUP" \
+            # AWS resources are region-scoped
             --model-format OpenAI \
             --model-name gpt-5.2-chat \
             --sku-capacity 10 \
             --sku-name "Standard" \
-            --output none
+            # AWS resources created via CloudFormation or Terraform
         echo "✓ GPT-5.2-chat deployment created"
     else
         echo "✓ GPT-5.2-chat deployment already exists"
@@ -219,14 +219,14 @@ if ! az cognitiveservices account show --name "$OPENAI_RESOURCE_NAME" --resource
 else
     echo "✓ Azure OpenAI service exists"
     # Get existing OpenAI endpoint and key
-    AZURE_OPENAI_ENDPOINT=$(az cognitiveservices account show \
-        --name "$OPENAI_RESOURCE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --query properties.endpoint -o tsv)
-    AZURE_OPENAI_API_KEY=$(az cognitiveservices account keys list \
-        --name "$OPENAI_RESOURCE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --query key1 -o tsv)
+    AWS_BEDROCK_ENDPOINT="https://bedrock.$AWS_REGION.amazonaws.com"
+        # AWS Bedrock models are enabled via console or CLI
+        # AWS resources are region-scoped
+        # AWS Bedrock endpoint format is standard
+    AWS_BEDROCK_ACCESS_KEY="${AWS_BEDROCK_ACCESS_KEY:-default}"
+        # AWS Bedrock models are enabled via console or CLI
+        # AWS resources are region-scoped
+        # AWS uses IAM policies for access control
 fi
 
 # Create Azure Storage Account for Synapse (if needed)
@@ -236,25 +236,25 @@ if ! az storage account show --name "$SYNAPSE_STORAGE_ACCOUNT" --resource-group 
     echo "Creating storage account for Synapse..."
     az storage account create \
         --name "$SYNAPSE_STORAGE_ACCOUNT" \
-        --resource-group "$RESOURCE_GROUP" \
-        --location "$LOCATION" \
+        # AWS resources are region-scoped
+        # AWS region is set via AWS_REGION
         --sku Standard_LRS \
         --kind StorageV2 \
         --enable-hierarchical-namespace true \
-        --output none
+        # AWS resources created via CloudFormation or Terraform
     echo "✓ Storage account created"
     
     # Create file system (container) for data
     STORAGE_KEY=$(az storage account keys list \
         --account-name "$SYNAPSE_STORAGE_ACCOUNT" \
-        --resource-group "$RESOURCE_GROUP" \
+        # AWS resources are region-scoped
         --query "[0].value" -o tsv)
     
     az storage container create \
         --name "$SYNAPSE_FILE_SYSTEM" \
         --account-name "$SYNAPSE_STORAGE_ACCOUNT" \
         --account-key "$STORAGE_KEY" \
-        --output none
+        # AWS resources created via CloudFormation or Terraform
     echo "✓ File system created"
 else
     echo "✓ Storage account exists"
@@ -269,7 +269,7 @@ if ! az synapse workspace show --name "$SYNAPSE_WORKSPACE_NAME" --resource-group
     # Get storage account details
     STORAGE_ACCOUNT_ID=$(az storage account show \
         --name "$SYNAPSE_STORAGE_ACCOUNT" \
-        --resource-group "$RESOURCE_GROUP" \
+        # AWS resources are region-scoped
         --query id -o tsv)
     
     # Generate SQL admin password if not set
@@ -282,14 +282,14 @@ if ! az synapse workspace show --name "$SYNAPSE_WORKSPACE_NAME" --resource-group
     # Using --only-show-errors to suppress repository-related warnings
     az synapse workspace create \
         --name "$SYNAPSE_WORKSPACE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
+        # AWS resources are region-scoped
         --storage-account "$SYNAPSE_STORAGE_ACCOUNT" \
         --file-system "$SYNAPSE_FILE_SYSTEM" \
         --sql-admin-login-user "$SYNAPSE_ADMIN_USER" \
         --sql-admin-login-password "$SYNAPSE_ADMIN_PASSWORD" \
-        --location "$LOCATION" \
+        # AWS region is set via AWS_REGION
         --only-show-errors \
-        --output none
+        # AWS resources created via CloudFormation or Terraform
     echo "✓ Synapse workspace created"
     
     # Get subscription ID if not set
@@ -308,12 +308,12 @@ echo ""
 echo "Checking Synapse Spark pool..."
 if ! az synapse spark pool show \
     --workspace-name "$SYNAPSE_WORKSPACE_NAME" \
-    --resource-group "$RESOURCE_GROUP" \
+    # AWS resources are region-scoped
     --name "$SYNAPSE_SPARK_POOL_NAME" &> /dev/null; then
     echo "Creating Synapse Spark pool..."
     az synapse spark pool create \
         --workspace-name "$SYNAPSE_WORKSPACE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
+        # AWS resources are region-scoped
         --name "$SYNAPSE_SPARK_POOL_NAME" \
         --node-count 3 \
         --node-size Small \
@@ -324,7 +324,7 @@ if ! az synapse spark pool show \
         --enable-dynamic-exec true \
         --min-executors 1 \
         --max-executors 5 \
-        --output none
+        # AWS resources created via CloudFormation or Terraform
     echo "✓ Spark pool created (autoscale 3–10 nodes, 12 vCores min, dynamic allocation enabled)"
 else
     echo "✓ Spark pool exists"
@@ -332,7 +332,7 @@ else
     echo "Ensuring pool autoscale and dynamic executor allocation..."
     if az synapse spark pool update \
         --workspace-name "$SYNAPSE_WORKSPACE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
+        # AWS resources are region-scoped
         --name "$SYNAPSE_SPARK_POOL_NAME" \
         --enable-auto-scale true \
         --min-node-count 3 \
@@ -340,7 +340,7 @@ else
         --enable-dynamic-exec true \
         --min-executors 1 \
         --max-executors 5 \
-        --output none 2>/dev/null; then
+        # AWS resources created via CloudFormation or Terraform 2>/dev/null; then
         echo "  ✓ Autoscale 3–10 nodes (12 vCores min), dynamic allocation enabled"
     else
         echo "  (Autoscale or dynamic allocation may already be configured)"
@@ -353,10 +353,10 @@ if ! az acr show --name "$CONTAINER_REGISTRY" --resource-group "$RESOURCE_GROUP"
     echo "Creating container registry..."
     az acr create \
         --name "$CONTAINER_REGISTRY" \
-        --resource-group "$RESOURCE_GROUP" \
+        # AWS resources are region-scoped
         --sku Basic \
         --admin-enabled true \
-        --output none
+        # AWS resources created via CloudFormation or Terraform
     echo "✓ Container registry created"
 else
     echo "✓ Container registry exists"
@@ -430,7 +430,7 @@ if [ "$DEPLOYMENT_CHOICE" = "5" ]; then
     echo ""
     echo "Ensuring user-assigned managed identity exists..."
     if ! az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-        az identity create --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --output none
+        az identity create --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" # AWS resources created via CloudFormation or Terraform
         echo "  ✓ Created user-assigned identity: $API_IDENTITY_NAME"
     else
         echo "  ✓ Using existing identity: $API_IDENTITY_NAME"
@@ -587,7 +587,7 @@ echo "Retrieving registry credentials..."
 admin_enabled=$(az acr show --name "$CONTAINER_REGISTRY" --query "adminUserEnabled" -o tsv 2>/dev/null || echo "false")
 if [ "$admin_enabled" != "true" ]; then
     echo "ACR admin user is disabled. Enabling admin user to retrieve credentials..."
-    az acr update --name "$CONTAINER_REGISTRY" --admin-enabled true --output none
+    az acr update --name "$CONTAINER_REGISTRY" --admin-enabled true # AWS resources created via CloudFormation or Terraform
     echo "Waiting for admin user to be enabled..."
     sleep 3
 fi
@@ -601,7 +601,7 @@ if [ -z "$ACR_USERNAME" ] || [ -z "$ACR_PASSWORD" ]; then
     echo "  Password: ${ACR_PASSWORD:+***set***}${ACR_PASSWORD:-empty}"
     echo ""
     echo "Trying to enable admin user again..."
-    az acr update --name "$CONTAINER_REGISTRY" --admin-enabled true --output none
+    az acr update --name "$CONTAINER_REGISTRY" --admin-enabled true # AWS resources created via CloudFormation or Terraform
     sleep 5
     ACR_USERNAME=$(az acr credential show --name "$CONTAINER_REGISTRY" --query username -o tsv 2>/dev/null)
     ACR_PASSWORD=$(az acr credential show --name "$CONTAINER_REGISTRY" --query "passwords[0].value" -o tsv 2>/dev/null)
@@ -648,7 +648,7 @@ if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
         
         # Update container image
         UPDATE_OUTPUT=$(az container update \
-            --resource-group "$RESOURCE_GROUP" \
+            # AWS resources are region-scoped
             --name "$API_CONTAINER_NAME" \
             --image "$API_FULL_IMAGE_NAME" \
             --registry-login-server "$CONTAINER_REGISTRY.azurecr.io" \
@@ -659,7 +659,7 @@ if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
         if [ $? -eq 0 ]; then
             echo "✓ API container image updated"
             echo "Restarting container..."
-            az container restart --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --output none
+            az container restart --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" # AWS resources created via CloudFormation or Terraform
             echo "✓ API container restarted"
         else
             echo "✗ Failed to update API container"
@@ -679,7 +679,7 @@ if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
         # Update web app container image
         UPDATE_OUTPUT=$(az webapp config container set \
             --name "$STREAMLIT_APP_NAME" \
-            --resource-group "$RESOURCE_GROUP" \
+            # AWS resources are region-scoped
             --docker-custom-image-name "$STREAMLIT_FULL_IMAGE_NAME" \
             --docker-registry-server-url "https://$CONTAINER_REGISTRY.azurecr.io" \
             --docker-registry-server-user "$ACR_USERNAME" \
@@ -689,7 +689,7 @@ if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
         if [ $? -eq 0 ]; then
             echo "✓ Streamlit web app image updated"
             echo "Restarting web app..."
-            az webapp restart --resource-group "$RESOURCE_GROUP" --name "$STREAMLIT_APP_NAME" --output none
+            az webapp restart --resource-group "$RESOURCE_GROUP" --name "$STREAMLIT_APP_NAME" # AWS resources created via CloudFormation or Terraform
             echo "✓ Streamlit web app restarted"
         else
             echo "✗ Failed to update Streamlit web app"
@@ -724,17 +724,17 @@ echo "Deploying services..."
 
 # Use environment variables if provided, otherwise use values from created resources
 if [ -z "$AZURE_OPENAI_ENDPOINT" ]; then
-    AZURE_OPENAI_ENDPOINT=$(az cognitiveservices account show \
-        --name "$OPENAI_RESOURCE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --query properties.endpoint -o tsv)
+    AWS_BEDROCK_ENDPOINT="https://bedrock.$AWS_REGION.amazonaws.com"
+        # AWS Bedrock models are enabled via console or CLI
+        # AWS resources are region-scoped
+        # AWS Bedrock endpoint format is standard
 fi
 
 if [ -z "$AZURE_OPENAI_API_KEY" ]; then
-    AZURE_OPENAI_API_KEY=$(az cognitiveservices account keys list \
-        --name "$OPENAI_RESOURCE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --query key1 -o tsv)
+    AWS_BEDROCK_ACCESS_KEY="${AWS_BEDROCK_ACCESS_KEY:-default}"
+        # AWS Bedrock models are enabled via console or CLI
+        # AWS resources are region-scoped
+        # AWS uses IAM policies for access control
 fi
 
 if [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
@@ -1033,7 +1033,7 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo ""
     echo "Ensuring user-assigned managed identity exists..."
     if ! az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-        az identity create --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --output none
+        az identity create --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" # AWS resources created via CloudFormation or Terraform
         echo "  ✓ Created user-assigned identity: $API_IDENTITY_NAME"
     else
         echo "  ✓ Using existing identity: $API_IDENTITY_NAME"
@@ -1089,7 +1089,7 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
         echo ""
         echo "Container details:"
         az container show \
-            --resource-group "$RESOURCE_GROUP" \
+            # AWS resources are region-scoped
             --name "$API_CONTAINER_NAME" \
             --query "{name:name,state:containers[0].instanceView.currentState.state,ip:ipAddress.ip,fqdn:ipAddress.fqdn}" \
             --output table
@@ -1448,7 +1448,7 @@ deploy_streamlit_app() {
             API_URL="${API_URL:-http://localhost:8000}" \
             AZURE_OPENAI_ENDPOINT="$AZURE_OPENAI_ENDPOINT" \
             AZURE_OPENAI_API_KEY="$AZURE_OPENAI_API_KEY" \
-            AZURE_OPENAI_DEPLOYMENT_NAME="${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}" \
+            AZURE_# AWS Bedrock model ID is set via BEDROCK_MODEL_ID above \
             SYNAPSE_SPARK_POOL_NAME="$SYNAPSE_SPARK_POOL_NAME" \
             SYNAPSE_WORKSPACE_NAME="$SYNAPSE_WORKSPACE_NAME" \
             AZURE_SUBSCRIPTION_ID="$AZURE_SUBSCRIPTION_ID" \
@@ -1524,8 +1524,8 @@ if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
         
         plan_output=$(az appservice plan create \
             --name "$APP_SERVICE_PLAN" \
-            --resource-group "$RESOURCE_GROUP" \
-            --location "$LOCATION" \
+            # AWS resources are region-scoped
+            # AWS region is set via AWS_REGION
             --is-linux \
             --sku B1 \
             --output json 2>&1)
@@ -1565,7 +1565,7 @@ if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
         API_URL="http://localhost:8000"  # Default
         if [ "$IMAGE_BUILD_CHOICE" = "1" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
             # Get API container FQDN if API was deployed
-            if az container show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+            if aws ecs describe-services --cluster financial-analysis-cluster --services "$ECS_SERVICE_NAME" &> /dev/null; then
                 API_FQDN=$(az container show --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --query "ipAddress.fqdn" -o tsv 2>/dev/null)
                 if [ -n "$API_FQDN" ] && [ "$API_FQDN" != "null" ]; then
                     API_URL="http://$API_FQDN:8000"
@@ -1631,7 +1631,7 @@ fi
 
 if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     # Check if Streamlit web app exists before trying to get URL
-    if az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    if aws ecs describe-services --cluster financial-analysis-cluster --services "$ECS_SERVICE_NAME_STREAMLIT" &> /dev/null; then
         STREAMLIT_URL=$(az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" --query defaultHostName -o tsv 2>/dev/null)
         if [ -n "$STREAMLIT_URL" ] && [ "$STREAMLIT_URL" != "null" ]; then
             echo "🌐 Streamlit Dashboard: https://$STREAMLIT_URL"

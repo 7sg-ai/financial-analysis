@@ -3,12 +3,9 @@
 pyarrow==14.0.1
 pandas==2.1.4
 
-# Azure Dependencies
-azure-identity==1.15.0
-azure-synapse-spark==0.7.0
-six>=1.16.0
+# AWS Dependencies
+boto3==1.28.0
 openai>=2.20.0,<3.0.0
-azure-storage-blob==12.19.0
 
 # API and Web Framework
 fastapi==0.109.0
@@ -33,4 +30,3 @@ pytest==7.4.4
 pytest-asyncio==0.23.3
 black==24.1.1
 flake8==7.0.0
-

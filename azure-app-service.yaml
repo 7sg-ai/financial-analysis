@@ -46,35 +46,35 @@ spec:
         - name: AWS_BEDROCK_REGION
           valueFrom:
             secretKeyRef:
-              name: azure-secrets
+              name: aws-secrets
               key: openai-endpoint
-        - name: AZURE_OPENAI_API_KEY
+        - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
-              name: azure-secrets
-              key: openai-key
-        - name: AZURE_OPENAI_DEPLOYMENT_NAME
+              name: aws-secrets
+              key: openai-api-key
+        - name: OPENAI_DEPLOYMENT_NAME
           value: "gpt-5.2-chat"
         - name: EMR_APPLICATION_ID
           valueFrom:
             secretKeyRef:
-              name: azure-secrets
-              key: synapse-spark-pool-name
-        - name: SYNAPSE_WORKSPACE_NAME
+              name: aws-secrets
+              key: emr-application-id
+        - name: EMR_CLUSTER_ID
           valueFrom:
             secretKeyRef:
-              name: azure-secrets
-              key: synapse-workspace-name
-        - name: AZURE_SUBSCRIPTION_ID
+              name: aws-secrets
+              key: emr-cluster-id
+        - name: AWS_ACCOUNT_ID
           valueFrom:
             secretKeyRef:
-              name: azure-secrets
-              key: subscription-id
-        - name: AZURE_RESOURCE_GROUP
+              name: aws-secrets
+              key: aws-account-id
+        - name: AWS_RESOURCE_GROUP
           valueFrom:
             secretKeyRef:
-              name: azure-secrets
-              key: resource-group
+              name: aws-secrets
+              key: aws-resource-group
         - name: STREAMLIT_PORT
           value: "8501"
         - name: STREAMLIT_HOST

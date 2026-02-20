@@ -4,12 +4,12 @@
 #
 # Usage:
 #   ./update_streamlit_api_url.sh
-#   AZURE_RESOURCE_GROUP=my-rg ./update_streamlit_api_url.sh
-#   API_CONTAINER_NAME=my-api STREAMLIT_APP_NAME=my-app ./update_streamlit_api_url.sh
+#   AWS_REGION=us-east-1 ./update_streamlit_api_url.sh
+#   API_TASK_NAME=my-api STREAMLIT_APP_NAME=my-app ./update_streamlit_api_url.sh
 #
 # Environment Variables:
-#   AZURE_RESOURCE_GROUP      - Azure resource group name (default: rg-financial-analysis)
-#   API_CONTAINER_NAME        - API container name (default: financial-analysis-api)
+#   AWS_REGION                - AWS region (default: us-east-1)
+#   API_TASK_NAME             - API task name (default: financial-analysis-api)
 #   STREAMLIT_APP_NAME        - Streamlit web app name (default: financial-analysis-streamlit)
 #   API_PORT                  - API port (default: 8000)
 
@@ -29,21 +29,21 @@ if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
     echo "  -h, --help     Show this help message"
     echo ""
     echo "Environment Variables:"
-    echo "  AZURE_RESOURCE_GROUP      Azure resource group name (default: rg-financial-analysis)"
-    echo "  API_CONTAINER_NAME        API container name (default: financial-analysis-api)"
+    echo "  AWS_REGION                AWS region (default: us-east-1)"
+    echo "  API_TASK_NAME             API task name (default: financial-analysis-api)"
     echo "  STREAMLIT_APP_NAME        Streamlit web app name (default: financial-analysis-streamlit)"
     echo "  API_PORT                  API port (default: 8000)"
     echo ""
     echo "Examples:"
     echo "  ./update_streamlit_api_url.sh"
-    echo "  AZURE_RESOURCE_GROUP=my-rg ./update_streamlit_api_url.sh"
-    echo "  API_CONTAINER_NAME=my-api STREAMLIT_APP_NAME=my-app ./update_streamlit_api_url.sh"
+    echo "  AWS_REGION=us-west-2 ./update_streamlit_api_url.sh"
+    echo "  API_TASK_NAME=my-api STREAMLIT_APP_NAME=my-app ./update_streamlit_api_url.sh"
     exit 0
 fi
 
 # Configuration - can be overridden via environment variables
-RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-financial-analysis}"
-API_CONTAINER_NAME="${API_CONTAINER_NAME:-financial-analysis-api}"
+AWS_REGION="${AWS_REGION:-us-east-1}"
+API_TASK_NAME="${API_TASK_NAME:-financial-analysis-api}"
 STREAMLIT_APP_NAME="${STREAMLIT_APP_NAME:-financial-analysis-streamlit}"
 API_PORT="${API_PORT:-8000}"
 
@@ -58,48 +58,48 @@ echo "Update Streamlit API URL"
 echo "=================================="
 echo ""
 echo "Configuration:"
-echo "  Resource Group: $RESOURCE_GROUP"
-echo "  API Container: $API_CONTAINER_NAME"
+echo "  AWS Region: $AWS_REGION"
+echo "  API Task: $API_TASK_NAME"
 echo "  Streamlit App: $STREAMLIT_APP_NAME"
 echo "  API Port: $API_PORT"
 echo ""
 
-# Check if Azure CLI is installed
-if ! command -v az &> /dev/null; then
-    echo -e "${RED}✗ Azure CLI is not installed${NC}"
-    echo "Please install Azure CLI: https://docs.microsoft.com/cli/azure/install-azure-cli"
+# Check if AWS CLI is installed
+if ! command -v aws &> /dev/null; then
+    echo -e "${RED}✗ AWS CLI is not installed${NC}"
+    echo "Please install AWS CLI: https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html"
     exit 1
 fi
 
-# Check if logged in to Azure
-if ! az account show &> /dev/null; then
-    echo -e "${YELLOW}⚠️  Not logged in to Azure. Logging in...${NC}"
-    az login
+# Check if logged in to AWS
+if ! aws sts get-caller-identity &> /dev/null; then
+    echo -e "${YELLOW}⚠️  Not logged in to AWS. Configuring AWS CLI...${NC}"
+    aws configure
 fi
 
 # Get API container FQDN
 echo "Retrieving API container FQDN..."
-if ! az container show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    echo -e "${RED}✗ API container '$API_CONTAINER_NAME' not found in resource group '$RESOURCE_GROUP'${NC}"
+if ! aws ecs describe-task-definition --task-definition "$API_TASK_NAME" --region "$AWS_REGION" &> /dev/null; then
+    echo -e "${RED}✗ API task '$API_TASK_NAME' not found in region '$AWS_REGION'${NC}"
     echo ""
-    echo "Available containers in resource group:"
-    az container list --resource-group "$RESOURCE_GROUP" --query "[].{Name:name,State:containers[0].instanceView.currentState.state}" -o table 2>/dev/null || echo "None found"
+    echo "Available tasks in region:"
+    aws ecs list-task-definitions --family-prefix "$API_TASK_NAME" --region "$AWS_REGION" --query "taskDefinitionArns[]" --output text 2>/dev/null || echo "None found"
     exit 1
 fi
 
-API_FQDN=$(az container show \
-    --resource-group "$RESOURCE_GROUP" \
-    --name "$API_CONTAINER_NAME" \
-    --query "ipAddress.fqdn" -o tsv 2>/dev/null)
+API_FQDN=$(aws ecs describe-task-definition \
+    --task-definition "$API_TASK_NAME" \
+    --region "$AWS_REGION" \
+    --query "taskDefinition.containerDefinitions[0].environment[?name=='FQDN'].value[0]" -o tsv 2>/dev/null)
 
 if [ -z "$API_FQDN" ] || [ "$API_FQDN" = "null" ]; then
     echo -e "${RED}✗ Could not retrieve API container FQDN${NC}"
     echo ""
-    echo "Container details:"
-    az container show \
-        --resource-group "$RESOURCE_GROUP" \
-        --name "$API_CONTAINER_NAME" \
-        --query "{name:name,state:containers[0].instanceView.currentState.state,ip:ipAddress.ip,fqdn:ipAddress.fqdn}" \
+    echo "Task details:"
+    aws ecs describe-task-definition \
+        --task-definition "$API_TASK_NAME" \
+        --region "$AWS_REGION" \
+        --query "{name:taskDefinitionArn,state:containerDefinitions[0].environment[?name=='STATE'].value[0],ip:containerDefinitions[0].environment[?name=='IP'].value[0],fqdn:containerDefinitions[0].environment[?name=='FQDN'].value[0]}" \
         --output table
     exit 1
 fi
@@ -110,11 +110,11 @@ echo ""
 
 # Check if Streamlit web app exists
 echo "Checking if Streamlit web app exists..."
-if ! az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    echo -e "${RED}✗ Streamlit web app '$STREAMLIT_APP_NAME' not found in resource group '$RESOURCE_GROUP'${NC}"
+if ! aws elasticbeanstalk describe-applications --application-name "$STREAMLIT_APP_NAME" --region "$AWS_REGION" &> /dev/null; then
+    echo -e "${RED}✗ Streamlit web app '$STREAMLIT_APP_NAME' not found in region '$AWS_REGION'${NC}"
     echo ""
-    echo "Available web apps in resource group:"
-    az webapp list --resource-group "$RESOURCE_GROUP" --query "[].{Name:name,State:state}" -o table 2>/dev/null || echo "None found"
+    echo "Available web apps in region:"
+    aws elasticbeanstalk describe-applications --region "$AWS_REGION" --query "Applications[].{Name:ApplicationName,State:Status}" -o table 2>/dev/null || echo "None found"
     exit 1
 fi
 
@@ -123,10 +123,11 @@ echo ""
 
 # Get current API_URL setting
 echo "Checking current API_URL setting..."
-CURRENT_API_URL=$(az webapp config appsettings list \
-    --name "$STREAMLIT_APP_NAME" \
-    --resource-group "$RESOURCE_GROUP" \
-    --query "[?name=='API_URL'].value" -o tsv 2>/dev/null || echo "")
+CURRENT_API_URL=$(aws elasticbeanstalk describe-configuration-settings \
+    --application-name "$STREAMLIT_APP_NAME" \
+    --environment-name "$STREAMLIT_APP_NAME-env" \
+    --region "$AWS_REGION" \
+    --query "ConfigurationSettings[?OptionName=='API_URL'].OptionValue" -o tsv 2>/dev/null || echo "")
 
 if [ -n "$CURRENT_API_URL" ]; then
     echo "  Current API_URL: $CURRENT_API_URL"
@@ -147,20 +148,22 @@ fi
 # Update API_URL setting
 echo ""
 echo "Updating API_URL environment variable..."
-UPDATE_OUTPUT=$(az webapp config appsettings set \
-    --name "$STREAMLIT_APP_NAME" \
-    --resource-group "$RESOURCE_GROUP" \
-    --settings API_URL="$API_URL" \
+UPDATE_OUTPUT=$(aws elasticbeanstalk update-environment \
+    --application-name "$STREAMLIT_APP_NAME" \
+    --environment-name "$STREAMLIT_APP_NAME-env" \
+    --option-settings Namespace=aws:elasticbeanstalk:application:environment,OptionName=API_URL,Value="$API_URL" \
+    --region "$AWS_REGION" \
     --output json 2>&1)
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ API_URL updated successfully${NC}"
     
     # Verify the update
-    VERIFIED_API_URL=$(az webapp config appsettings list \
-        --name "$STREAMLIT_APP_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --query "[?name=='API_URL'].value" -o tsv 2>/dev/null)
+    VERIFIED_API_URL=$(aws elasticbeanstalk describe-configuration-settings \
+        --application-name "$STREAMLIT_APP_NAME" \
+        --environment-name "$STREAMLIT_APP_NAME-env" \
+        --region "$AWS_REGION" \
+        --query "ConfigurationSettings[?OptionName=='API_URL'].OptionValue" -o tsv 2>/dev/null)
     
     if [ "$VERIFIED_API_URL" = "$API_URL" ]; then
         echo -e "${GREEN}✓ Verified: API_URL is set to $API_URL${NC}"
@@ -176,18 +179,18 @@ if [ $? -eq 0 ]; then
     echo "The Streamlit app will use the new API URL on its next request."
     echo ""
     echo "To restart the app immediately (recommended):"
-    echo "  az webapp restart --name $STREAMLIT_APP_NAME --resource-group $RESOURCE_GROUP"
+    echo "  aws elasticbeanstalk restart-environment --environment-name $STREAMLIT_APP_NAME-env --region $AWS_REGION"
     echo ""
     read -p "Restart Streamlit app now? (y/N): " -n 1 -r
     echo ""
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo ""
         echo "Restarting Streamlit app..."
-        az webapp restart --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP"
+        aws elasticbeanstalk restart-environment --environment-name "$STREAMLIT_APP_NAME-env" --region "$AWS_REGION"
         echo -e "${GREEN}✓ Streamlit app restarted${NC}"
         echo ""
         echo "The app may take a minute to fully restart."
-        echo "Check status: az webapp show --name $STREAMLIT_APP_NAME --resource-group $RESOURCE_GROUP --query state -o tsv"
+        echo "Check status: aws elasticbeanstalk describe-environments --application-name $STREAMLIT_APP_NAME --environment-names $STREAMLIT_APP_NAME-env --region $AWS_REGION --query 'Environments[0].Status' -o tsv"
     fi
 else
     echo -e "${RED}✗ Failed to update API_URL${NC}"

@@ -1,49 +1,46 @@
 #!/bin/bash
-# Script to find and fix Azure OpenAI endpoint and deployment configuration
-# This script helps identify the correct endpoint and available deployments
+# Script to find and fix AWS Bedrock endpoint and deployment configuration
+# This script helps identify the correct endpoint and available models
 
 set -e
 
 # Configuration
-RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-financial-analysis}"
-OPENAI_RESOURCE_NAME="${AZURE_OPENAI_RESOURCE_NAME:-financial-analysis-openai}"
+AWS_REGION="${AWS_REGION:-us-east-1}"
+BEDROCK_MODEL_ID="${BEDROCK_MODEL_ID:-anthropic.claude-3-5-sonnet-20240620-v1:0}"
 
 echo "=================================="
-echo "Azure OpenAI Endpoint & Deployment Fixer"
+echo "AWS Bedrock Endpoint & Model Fixer"
 echo "=================================="
 echo ""
 echo "This script will help you:"
-echo "  1. Find your Azure OpenAI resource endpoint"
-echo "  2. List available deployments"
-echo "  3. Create a deployment if needed"
+echo "  1. Find your AWS Bedrock endpoint"
+echo "  2. List available models"
+echo "  3. Create a model access configuration if needed"
 echo ""
 
-# Check if Azure CLI is installed
-if ! command -v az &> /dev/null; then
-    echo "✗ Azure CLI is not installed"
+# Check if AWS CLI is installed
+if ! command -v aws &> /dev/null; then
+    echo "✗ AWS CLI is not installed"
     exit 1
 fi
 
 # Check if logged in
-if ! az account show &> /dev/null; then
-    echo "⚠️  Not logged in to Azure. Logging in..."
-    az login
+if ! aws sts get-caller-identity &> /dev/null; then
+    echo "⚠️  Not logged in to AWS. Logging in..."
+    aws configure
 fi
 
-echo "Step 1: Finding Azure OpenAI resource..."
-if ! az cognitiveservices account show --name "$OPENAI_RESOURCE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    echo "✗ Azure OpenAI resource '$OPENAI_RESOURCE_NAME' not found"
+echo "Step 1: Finding AWS Bedrock model..."
+if ! aws bedrock list-foundation-models --region "$AWS_REGION" --query "modelSummaries[?contains(modelId, '$BEDROCK_MODEL_ID')]" &> /dev/null; then
+    echo "✗ AWS Bedrock model '$BEDROCK_MODEL_ID' not found in region '$AWS_REGION'"
     echo ""
-    echo "Available Cognitive Services resources:"
-    az cognitiveservices account list --resource-group "$RESOURCE_GROUP" --query "[].{Name:name,Kind:kind,Endpoint:properties.endpoint}" -o table 2>/dev/null || echo "None found"
+    echo "Available Bedrock models:"
+    aws bedrock list-foundation-models --region "$AWS_REGION" --query "modelSummaries[].{ModelId:modelId,ModelName:modelName}" -o table 2>/dev/null || echo "None found"
     exit 1
 fi
 
-# Get endpoint
-ENDPOINT=$(az cognitiveservices account show \
-    --name "$OPENAI_RESOURCE_NAME" \
-    --resource-group "$RESOURCE_GROUP" \
-    --query properties.endpoint -o tsv 2>/dev/null)
+# Get model ARN
+MODEL_ARN=$(aws bedrock list-foundation-models --region "$AWS_REGION" --query "modelSummaries[?contains(modelId, '$BEDROCK_MODEL_ID')].modelArn" --output text 2>/dev/null)
 
 if [ -z "$ENDPOINT" ]; then
     echo "✗ Could not retrieve endpoint"
@@ -81,111 +78,70 @@ else
 fi
 
 # Normalize endpoint (remove trailing slash)
-OPENAI_ENDPOINT=$(echo "$OPENAI_ENDPOINT" | sed 's|/$||')
+BEDROCK_ENDPOINT=$(echo "$BEDROCK_ENDPOINT" | sed 's|/$||')
 
 echo ""
-echo "Step 2: Checking available deployments..."
+echo "Step 2: Checking available models..."
 echo ""
 
-# Get API key
-API_KEY=$(az cognitiveservices account keys list \
-    --name "$OPENAI_RESOURCE_NAME" \
-    --resource-group "$RESOURCE_GROUP" \
-    --query key1 -o tsv 2>/dev/null)
+# Get AWS credentials
+AWS_ACCESS_KEY=$(aws configure get aws_access_key_id --profile default 2>/dev/null)
+AWS_SECRET_KEY=$(aws configure get aws_secret_access_key --profile default 2>/dev/null)
 
 if [ -z "$API_KEY" ]; then
     echo "✗ Could not retrieve API key"
     exit 1
 fi
 
-# Test if the gpt-5.2-chat deployment exists by trying to use it
-echo "Testing if 'gpt-5.2-chat' deployment exists..."
-TEST_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-    -H "api-key: $API_KEY" \
-    -H "Content-Type: application/json" \
-    -d '{"messages":[{"role":"user","content":"test"}],"max_completion_tokens":5}' \
-    "${OPENAI_ENDPOINT}/openai/deployments/gpt-5.2-chat/chat/completions?api-version=2024-12-01-preview" 2>/dev/null)
+# Test if the model is accessible by trying to use it
+echo "Testing if '$BEDROCK_MODEL_ID' model is accessible..."
+TEST_RESPONSE=$(aws bedrock-runtime invoke-model --model-id "$BEDROCK_MODEL_ID" --body '{"prompt":"\n\nHuman: test\n\nAssistant:","max_tokens_to_sample":5}' --region "$AWS_REGION" 2>/dev/null)
 
-HTTP_CODE=$(echo "$TEST_RESPONSE" | tail -n1)
-TEST_BODY=$(echo "$TEST_RESPONSE" | sed '$d')
-
-if [ "$HTTP_CODE" = "200" ]; then
-    echo "✓ 'gpt-5.2-chat' deployment exists and is working"
-    DEPLOYMENT_EXISTS=true
-elif [ "$HTTP_CODE" = "404" ]; then
-    # Check if it's a DeploymentNotFound error
-    if echo "$TEST_BODY" | grep -q "DeploymentNotFound"; then
-        echo "⚠️  'gpt-5.2-chat' deployment not found"
-        DEPLOYMENT_EXISTS=false
-    else
-        echo "⚠️  Got 404, but may be endpoint format issue"
-        DEPLOYMENT_EXISTS=false
-    fi
+if [ $? -eq 0 ]; then
+    echo "✓ '$BEDROCK_MODEL_ID' model is accessible"
+    MODEL_EXISTS=true
 else
-    echo "⚠️  Unexpected response (HTTP $HTTP_CODE)"
-    echo "Response: $TEST_BODY"
-    DEPLOYMENT_EXISTS=false
+    echo "⚠️  '$BEDROCK_MODEL_ID' model is not accessible"
+    MODEL_EXISTS=false
 fi
 
-# Try to list deployments as a fallback (some endpoints may not support this)
-if [ "$DEPLOYMENT_EXISTS" = false ]; then
+# Try to list models as a fallback
+if [ "$MODEL_EXISTS" = false ]; then
     echo ""
-    echo "Attempting to list deployments (may not be supported for this endpoint format)..."
-    DEPLOYMENTS_RESPONSE=$(curl -s -w "\n%{http_code}" \
-        -H "api-key: $API_KEY" \
-        "${OPENAI_ENDPOINT}/openai/deployments?api-version=2024-12-01-preview" 2>/dev/null)
+    echo "Attempting to list available models..."
+    MODELS_RESPONSE=$(aws bedrock list-foundation-models --region "$AWS_REGION" --query "modelSummaries[].{ModelId:modelId,ModelName:modelName}" -o table 2>/dev/null)
     
-    LIST_HTTP_CODE=$(echo "$DEPLOYMENTS_RESPONSE" | tail -n1)
-    DEPLOYMENTS_BODY=$(echo "$DEPLOYMENTS_RESPONSE" | sed '$d')
-    
-    if [ "$LIST_HTTP_CODE" = "200" ]; then
-        echo "✓ Successfully retrieved deployments list"
+    if [ $? -eq 0 ]; then
+        echo "✓ Successfully retrieved models list"
         echo ""
-        echo "Available deployments:"
-        echo "$DEPLOYMENTS_BODY" | python3 -m json.tool 2>/dev/null | grep -A 5 '"id"' || echo "$DEPLOYMENTS_BODY"
+        echo "Available models:"
+        echo "$MODELS_RESPONSE"
         echo ""
-        
-        # Extract deployment names
-        DEPLOYMENT_NAMES=$(echo "$DEPLOYMENTS_BODY" | python3 -c "import sys, json; data=json.load(sys.stdin); print('\n'.join([d['id'] for d in data.get('data', [])]))" 2>/dev/null || echo "")
-        
-        if [ -n "$DEPLOYMENT_NAMES" ]; then
-            echo "Deployment names found:"
-            echo "$DEPLOYMENT_NAMES" | while read -r name; do
-                echo "  - $name"
-            done
-            echo ""
-        fi
     else
-        echo "⚠️  Deployments list endpoint not available (HTTP $LIST_HTTP_CODE)"
-        echo "   This is normal for some endpoint formats - we'll test the deployment directly"
+        echo "⚠️  Models list endpoint not available"
     fi
 fi
 
-# Offer to create deployment if it doesn't exist
-if [ "$DEPLOYMENT_EXISTS" = false ]; then
+# Offer to enable model access if it's not available
+if [ "$MODEL_EXISTS" = false ]; then
     echo ""
-    read -p "Create 'gpt-5.2-chat' deployment? (y/N): " -n 1 -r
+    read -p "Enable '$BEDROCK_MODEL_ID' model access? (y/N): " -n 1 -r
     echo ""
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo ""
-        echo "Creating GPT-5.2-chat deployment (this may take several minutes)..."
-        az cognitiveservices account deployment create \
-            --name "$OPENAI_RESOURCE_NAME" \
-            --resource-group "$RESOURCE_GROUP" \
-            --deployment-name "gpt-5.2-chat" \
-            --model-name "gpt-5.2-chat" \
-            --model-format "OpenAI" \
-            --sku-capacity 10 \
-            --sku-name "Standard" 2>&1 | tee /tmp/deployment-create.log
+        echo "Enabling '$BEDROCK_MODEL_ID' model access..."
+        aws bedrock create-model-access-configuration \
+            --model-id "$BEDROCK_MODEL_ID" \
+            --model-access-type "DIRECT" \
+            --region "$AWS_REGION" 2>&1 | tee /tmp/model-access-enable.log
         
         if [ $? -eq 0 ]; then
             echo ""
-            echo "✓ GPT-5.2-chat deployment created successfully"
-            echo "   Note: It may take a few minutes for the deployment to be fully available"
-            DEPLOYMENT_EXISTS=true
+            echo "✓ '$BEDROCK_MODEL_ID' model access enabled successfully"
+            MODEL_EXISTS=true
         else
             echo ""
-            echo "✗ Failed to create deployment. Check /tmp/deployment-create.log for details"
+            echo "✗ Failed to enable model access. Check /tmp/model-access-enable.log for details"
         fi
     fi
 fi
@@ -195,29 +151,29 @@ echo "=================================="
 echo "Summary"
 echo "=================================="
 echo ""
-echo "Endpoint: $OPENAI_ENDPOINT"
-echo "Resource: $OPENAI_RESOURCE_NAME"
-echo "Deployment: gpt-5.2-chat"
-echo "API Version: 2024-12-01-preview"
+echo "Endpoint: $BEDROCK_ENDPOINT"
+echo "Model: $BEDROCK_MODEL_ID"
+echo "Region: $AWS_REGION"
+echo "Model ARN: $MODEL_ARN"
 echo ""
 
-# Check if containers/web apps exist and offer to update them
-API_CONTAINER_NAME="financial-analysis-api"
+# Check if Lambda functions or containers exist and offer to update them
+LAMBDA_FUNCTION_NAME="financial-analysis-api"
 STREAMLIT_APP_NAME="financial-analysis-streamlit"
 
-UPDATE_CONTAINER=false
+UPDATE_LAMBDA=false
 UPDATE_STREAMLIT=false
 
-# Check if API container exists
-if az container show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    echo "✓ Found API container: $API_CONTAINER_NAME"
-    read -p "Update API container with new endpoint and deployment settings? (y/N): " -n 1 -r
+# Check if Lambda function exists
+if aws lambda get-function --function-name "$LAMBDA_FUNCTION_NAME" --region "$AWS_REGION" &> /dev/null; then
+    echo "✓ Found Lambda function: $LAMBDA_FUNCTION_NAME"
+    read -p "Update Lambda function with new model settings? (y/N): " -n 1 -r
     echo ""
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        UPDATE_CONTAINER=true
+        UPDATE_LAMBDA=true
     fi
 else
-    echo "⚠️  API container '$API_CONTAINER_NAME' not found (will skip)"
+    echo "⚠️  Lambda function '$LAMBDA_FUNCTION_NAME' not found in region '$AWS_REGION'"_CONTAINER_NAME' not found (will skip)"
 fi
 
 # Check if Streamlit web app exists

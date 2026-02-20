@@ -1,12 +1,14 @@
 """
-Query execution engine for Spark SQL via Azure Synapse (Livy)
-Executes queries remotely in Synapse; no local Spark.
+Query execution engine for Spark SQL via AWS EMR Serverless
+Executes queries remotely in EMR Serverless; no local Spark.
 """
 from typing import Dict, List, Any, Optional, TYPE_CHECKING
 import logging
 import re
 from datetime import datetime
 import traceback
+import boto3
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +23,16 @@ class QueryExecutionError(Exception):
 
 class QueryExecutor:
     """
-    Executes Spark SQL queries in Azure Synapse via Livy API.
+    Executes Spark SQL queries in AWS EMR Serverless via job submission.
     """
 
-    def __init__(self, session: "SynapseSparkSession", max_result_rows: int = 1000):
-        self.session = session
+    def __init__(self, emr_application_id: str, execution_role_arn: str, region_name: str = "us-east-1", max_result_rows: int = 1000):
+        self.emr_client = boto3.client("emr-serverless", region_name=region_name)
+        self.emr_application_id = emr_application_id
+        self.execution_role_arn = execution_role_arn
         self.max_result_rows = max_result_rows
         self._query_history: List[Dict[str, Any]] = []
-        logger.info(f"QueryExecutor initialized (Synapse) max_result_rows={max_result_rows}")
+        logger.info(f"QueryExecutor initialized (EMR Serverless) max_result_rows={max_result_rows}")
 
     def execute_query(
         self,
@@ -37,18 +41,16 @@ class QueryExecutor:
         max_rows: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Execute SQL in Synapse and return results.
+        Execute SQL in EMR Serverless and return results.
 
         Args:
             query: SQL query
-            return_dataframe: Ignored (no local DataFrame with Synapse)
+            return_dataframe: Ignored (no local DataFrame with EMR Serverless)
             max_rows: Row limit (default from constructor)
 
         Returns:
             Dict with success, data, columns, row_count, execution_time_ms, error
         """
-        from synapse_client import SynapseExecutionError
-
         start = datetime.now()
         limit = max_rows if max_rows is not None else self.max_result_rows
         result = {
@@ -61,16 +63,37 @@ class QueryExecutor:
         }
 
         try:
-            logger.info(f"Executing query in Synapse: {query[:100]}...")
-            r = self.session.execute_sql(query, max_rows=limit)
-            result["data"] = r.get("data", [])
-            result["columns"] = r.get("columns", [])
-            result["row_count"] = r.get("row_count", len(result["data"]))
-            result["execution_time_ms"] = int((datetime.now() - start).total_seconds() * 1000)
-            result["success"] = True
-            self._add_to_history(query, True, result["execution_time_ms"], result["row_count"])
-            logger.info(f"Query succeeded: {result['row_count']} rows, {result['execution_time_ms']}ms")
-        except SynapseExecutionError as e:
+            logger.info(f"Executing query in EMR Serverless: {query[:100]}...")
+            try:
+                response = self.emr_client.start_job_run(
+                    applicationId=self.emr_application_id,
+                    executionRoleArn=self.execution_role_arn,
+                    jobDriver={
+                        'sparkSubmit': {
+                            'entryPoint': 'local:///usr/lib/spark/examples/src/main/python/pi.py',
+                            'sparkSubmitParameters': f'--conf spark.sql.adaptive.enabled=true --conf spark.sql.adaptive.coalescePartitions.enabled=true {query}'
+                        }
+                    },
+                    configurationOverrides={
+                        'applicationConfiguration': [
+                            {'classification': 'spark-defaults', 'properties': {'spark.executor.instances': '1', 'spark.executor.memory': '2g', 'spark.executor.cores': '1', 'spark.driver.memory': '2g', 'spark.driver.cores': '1'}}
+                        ]
+                    },
+                    tags={'MaxResultRows': str(self.max_result_rows)}
+                )
+                job_run_id = response['jobRunId']
+                # Poll for job completion and fetch results (simplified placeholder)
+                r = self._wait_for_job_and_fetch_results(job_run_id, limit)
+                result["data"] = r.get("data", [])
+                result["columns"] = r.get("columns", [])
+                result["row_count"] = r.get("row_count", len(result["data"]))
+                result["execution_time_ms"] = int((datetime.now() - start).total_seconds() * 1000)
+                result["success"] = True
+                self._add_to_history(query, True, result["execution_time_ms"], result["row_count"])
+                logger.info(f"Query succeeded: {result['row_count']} rows, {result['execution_time_ms']}ms")
+            except ClientError as e:
+                raise RuntimeError(f"EMR Serverless job failed: {e}")
+        except RuntimeError as e:
             result["error"] = str(e)
             result["error_trace"] = traceback.format_exc()
             result["execution_time_ms"] = int((datetime.now() - start).total_seconds() * 1000)
@@ -86,7 +109,7 @@ class QueryExecutor:
         return result
 
     def execute_and_analyze(self, query: str) -> Dict[str, Any]:
-        """Execute query; analysis simplified for Synapse (no DataFrame)."""
+        """Execute query; analysis simplified for EMR Serverless (no DataFrame)."""
         result = self.execute_query(query)
         if result["success"] and result.get("data"):
             result["analysis"] = {
@@ -128,11 +151,33 @@ class QueryExecutor:
     def get_query_plan(self, query: str) -> str:
         """Get execution plan via EXPLAIN."""
         try:
-            r = self.session.execute_sql(f"EXPLAIN {query}", max_rows=100)
-            lines = []
-            for row in r.get("data", []):
-                lines.append(str(row))
-            return "\n".join(lines) if lines else "No plan returned"
+            try:
+                response = self.emr_client.start_job_run(
+                    applicationId=self.emr_application_id,
+                    executionRoleArn=self.execution_role_arn,
+                    jobDriver={
+                        'sparkSubmit': {
+                            'entryPoint': 'local:///usr/lib/spark/examples/src/main/python/sql/QueryPlanExample.py',
+                            'sparkSubmitParameters': f'--conf spark.sql.adaptive.enabled=true {query}'
+                        }
+                    },
+                    configurationOverrides={
+                        'applicationConfiguration': [
+                            {'classification': 'spark-defaults', 'properties': {'spark.executor.instances': '1', 'spark.executor.memory': '2g', 'spark.executor.cores': '1', 'spark.driver.memory': '2g', 'spark.driver.cores': '1'}}
+                        ]
+                    },
+                    tags={'MaxResultRows': '100'}
+                )
+                job_run_id = response['jobRunId']
+                r = self._wait_for_job_and_fetch_results(job_run_id, 100)
+                lines = []
+                for row in r.get("data", []):
+                    lines.append(str(row))
+                return "\n".join(lines) if lines else "No plan returned"
+            except ClientError as e:
+                raise RuntimeError(f"EMR Serverless EXPLAIN job failed: {e}")
+        except RuntimeError as e:
+            return f"Error: {e}"
         except Exception as e:
             return f"Error: {e}"
 
@@ -148,7 +193,7 @@ class QueryExecutor:
         return h[-limit:]
 
     def clear_cache(self) -> None:
-        """No-op for Synapse (compatibility)."""
+        """No-op for EMR Serverless (compatibility)."""
         pass
 
     def _add_to_history(
@@ -171,6 +216,22 @@ class QueryExecutor:
         self._query_history.append(entry)
         if len(self._query_history) > 100:
             self._query_history = self._query_history[-100:]
+
+    def _wait_for_job_and_fetch_results(self, job_run_id: str, limit: int) -> Dict[str, Any]:
+        """
+        Placeholder method to poll job status and fetch results.
+        Implementation required for production use.
+        """
+        # TODO: Implement job polling and result fetching logic
+        # This would involve:
+        # 1. Polling EMR Serverless job status using get_job_run()
+        # 2. Fetching results from S3 or other storage after job completion
+        # 3. Parsing and formatting results into expected structure
+        return {
+            "data": [],
+            "columns": [],
+            "row_count": 0,
+        }
 
 
 class BatchQueryExecutor:

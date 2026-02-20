@@ -7,8 +7,8 @@ import logging
 import re
 from datetime import datetime
 import traceback
-import boto3
-from botocore.exceptions import ClientError
+from crusoe_spark.client import SparkClient
+from crusoe_spark.exceptions import SparkError
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +26,9 @@ class QueryExecutor:
     Executes Spark SQL queries in AWS EMR Serverless via job submission.
     """
 
-    def __init__(self, emr_application_id: str, execution_role_arn: str, region_name: str = "us-east-1", max_result_rows: int = 1000):
-        self.emr_client = boto3.client("emr-serverless", region_name=region_name)
-        self.emr_application_id = emr_application_id
-        self.execution_role_arn = execution_role_arn
+    def __init__(self, cluster_id: str, api_key: str, region: str = "us-east-1", max_result_rows: int = 1000):
+        self.spark_client = SparkClient(cluster_id=cluster_id, api_key=api_key, region=region)
+        self.cluster_id = cluster_id
         self.max_result_rows = max_result_rows
         self._query_history: List[Dict[str, Any]] = []
         logger.info(f"QueryExecutor initialized (EMR Serverless) max_result_rows={max_result_rows}")
@@ -65,25 +64,23 @@ class QueryExecutor:
         try:
             logger.info(f"Executing query in EMR Serverless: {query[:100]}...")
             try:
-                response = self.emr_client.start_job_run(
-                    applicationId=self.emr_application_id,
-                    executionRoleArn=self.execution_role_arn,
-                    jobDriver={
-                        'sparkSubmit': {
-                            'entryPoint': 'local:///usr/lib/spark/examples/src/main/python/pi.py',
-                            'sparkSubmitParameters': f'--conf spark.sql.adaptive.enabled=true --conf spark.sql.adaptive.coalescePartitions.enabled=true {query}'
-                        }
+                response = self.spark_client.submit_job(
+                    job_type='spark_sql',
+                    sql_query=query,
+                    config={
+                        'spark.executor.instances': 1,
+                        'spark.executor.memory': '2g',
+                        'spark.executor.cores': 1,
+                        'spark.driver.memory': '2g',
+                        'spark.driver.cores': 1,
+                        'spark.sql.adaptive.enabled': True,
+                        'spark.sql.adaptive.coalescePartitions.enabled': True
                     },
-                    configurationOverrides={
-                        'applicationConfiguration': [
-                            {'classification': 'spark-defaults', 'properties': {'spark.executor.instances': '1', 'spark.executor.memory': '2g', 'spark.executor.cores': '1', 'spark.driver.memory': '2g', 'spark.driver.cores': '1'}}
-                        ]
-                    },
-                    tags={'MaxResultRows': str(self.max_result_rows)}
+                    max_result_rows=self.max_result_rows
                 )
                 job_run_id = response['jobRunId']
                 # Poll for job completion and fetch results (simplified placeholder)
-                r = self._wait_for_job_and_fetch_results(job_run_id, limit)
+                r = self.spark_client.get_job_result(response['jobId'], max_rows=limit)
                 result["data"] = r.get("data", [])
                 result["columns"] = r.get("columns", [])
                 result["row_count"] = r.get("row_count", len(result["data"]))

@@ -15,7 +15,7 @@ class DataLoader:
     Uses EMR Serverless boto3 client - no local Spark.
     """
 
-    def __init__(self, aws_region: str, emr_application_id: str, execution_role_arn: str):
+    def __init__(self, s3_bucket: str, s3_prefix: str = ""):
         import boto3
         from botocore.exceptions import ClientError
         
@@ -47,13 +47,13 @@ class DataLoader:
 
         pattern = "yellow_tripdata_*-*.parquet" if not year else f"yellow_tripdata_{year}-*.parquet"
         try:
-            response = self.emr_client.start_job_run(
+            self._load_parquet_to_temp_view(
                 applicationId=self.emr_application_id,
                 executionRoleArn=self.execution_role_arn,
                 jobDriver={
                     'sparkSubmit': {
-                        'entryPoint': 's3://<bucket>/scripts/load_parquet.py',
-                        'sparkSubmitParameters': f'--conf spark.app.name=load_yellow_taxi --conf spark.sql.sources.partitionOverwriteMode=dynamic s3://<bucket>/data/{pattern} yellow_taxi {months}'
+                        'entryPoint': 'crusoe://data/scripts/load_parquet.py',
+                        'sparkSubmitParameters': f'--conf spark.app.name=load_yellow_taxi --conf spark.sql.sources.partitionOverwriteMode=dynamic crusoe://data/{pattern} yellow_taxi {months}'
                     }
                 },
                 configurationOverrides={

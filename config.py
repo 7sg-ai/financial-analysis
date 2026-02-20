@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     aws_account_id: str = Field(..., env="AWS_ACCOUNT_ID")
     
     # Persistent Disk Configuration (replaces Azure Storage)
-    persistent_disk_path: Optional[str] = Field(default=None, env="PERSISTENT_DISK_PATH")
+    persistent_disk_path: Optional[str] = Field(default="/crusoe/data", env="PERSISTENT_DISK_PATH")
     
     # Application Configuration
     data_path: str = Field(default="./src_data", env="DATA_PATH")

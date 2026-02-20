@@ -74,7 +74,7 @@ import os
 
 # Always read API_URL from environment variable (can change between restarts)
 # This ensures the app uses the latest environment variable value
-env_api_url = os.getenv("API_URL", "http://localhost:8000")
+env_api_url = os.getenv("API_URL", "http://localhost:8000")  # Crusoe local dev endpoint
 if 'api_url' not in st.session_state or st.session_state.api_url != env_api_url:
     # Update session state if environment variable changed or not set
     st.session_state.api_url = env_api_url

@@ -11,7 +11,7 @@ import logging
 import asyncio
 from contextlib import asynccontextmanager
 
-from config import get_settings
+from config import get_settings  # Ensure Crusoe-compatible config
 from analysis_engine import FinancialAnalysisEngine
 
 # Configure logging - set to DEBUG for troubleshooting
@@ -83,7 +83,7 @@ settings = get_settings()
 app = FastAPI(
     title=settings.api_title,
     version=settings.api_version,
-    description="Interactive financial analysis API using Azure Synapse Spark and Azure OpenAI",
+    description="Interactive financial analysis API using Crusoe Spark and OpenAI-compatible services",
     lifespan=lifespan
 )
 

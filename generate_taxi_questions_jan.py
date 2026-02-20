@@ -8,7 +8,7 @@ import requests
 import time
 from datetime import datetime
 
-API_BASE_URL = "https://financial-analysis-api.crusoe-apps.internal:8000"
+API_BASE_URL = "https://api.crusoecloud.com/v1/infer"
 
 # Categories of questions - filtered for January 2024 only
 QUESTION_TEMPLATES = [

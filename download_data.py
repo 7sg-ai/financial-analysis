@@ -19,6 +19,9 @@ Usage Examples:
     # Upload-only: Populate storage from existing src_data (e.g. from inside container)
     python3 download_data.py --upload-only
     
+    # Upload all files in src_data/ to Crusoe Storage
+    python3 download_data.py --upload-only --src-dir src_data
+    
     # Download only yellow and green taxis
     python3 download_data.py --service-types yellow green
     
@@ -70,6 +73,7 @@ import argparse
 import time
 from typing import Optional, Tuple
 import boto3
+from urllib.parse import urlparse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -87,6 +91,39 @@ DATA_URLS = {
 # Years and months to download
 YEARS = [2023, 2024, 2025]
 MONTHS = list(range(1, 13))  # 1-12
+
+def upload_to_crusoe_storage(local_path: Path, remote_path: str = None) -> bool:
+    """Upload file to Crusoe Storage (S3-compatible)"""
+    import os
+    from urllib.parse import urlparse
+    
+    bucket = os.getenv("AWS_S3_BUCKET", os.getenv("AZURE_STORAGE_CONTAINER", os.getenv("SYNAPSE_FILE_SYSTEM", "data")))
+    endpoint = os.getenv("CRUSOE_STORAGE_ENDPOINT", "https://s3.crusoecloud.com")
+    
+    # Parse remote path or derive from local filename
+    if remote_path is None:
+        remote_path = local_path.name
+    
+    # Determine if using Crusoe Storage or external S3
+    parsed_endpoint = urlparse(endpoint)
+    use_crusoe = "crusoecloud.com" in parsed_endpoint.netloc
+    
+    # Initialize S3 client with Crusoe-specific config
+    s3_client = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID", os.getenv("AZURE_STORAGE_ACCOUNT_NAME", os.getenv("SYNAPSE_STORAGE_ACCOUNT"))),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY", os.getenv("AZURE_STORAGE_ACCOUNT_KEY")),
+        region_name="crusoe"
+    )
+    
+    try:
+        s3_client.upload_file(str(local_path), bucket, remote_path)
+        logger.info(f"Uploaded {local_path} to s3://{bucket}/{remote_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to upload to Crusoe Storage: {e}")
+        return False
 
 def download_file(url: str, filepath: Path, retries: int = 3) -> bool:
     """Download a file from URL to filepath with retry logic"""

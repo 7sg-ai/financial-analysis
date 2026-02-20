@@ -1,0 +1,77 @@
+{
+  "checkpoints": [
+    {
+      "id": 1,
+      "file": "config.py",
+      "commit_hash": "52fd0c753786b3e1cd5ede7ac4e7d4332b111002",
+      "description": "Translated Azure\u2192CRUSOE: config.py",
+      "timestamp": "2026-02-20T11:04:20.735269",
+      "metadata": {}
+    },
+    {
+      "id": 2,
+      "file": "data_loader.py",
+      "commit_hash": "74be9730d166b8801c6b471a89bcc9c2b19e7828",
+      "description": "Translated Azure\u2192CRUSOE: data_loader.py",
+      "timestamp": "2026-02-20T11:04:50.373902",
+      "metadata": {}
+    },
+    {
+      "id": 3,
+      "file": "query_executor.py",
+      "commit_hash": "616f8a4eae4b696c2f3ada5e648d67cc328d34ef",
+      "description": "Translated Azure\u2192CRUSOE: query_executor.py",
+      "timestamp": "2026-02-20T11:05:19.413082",
+      "metadata": {}
+    },
+    {
+      "id": 4,
+      "file": "analysis_engine.py",
+      "commit_hash": "1dac9c8e3838fb7cac22dabb15de515c015205e5",
+      "description": "Translated Azure\u2192CRUSOE: analysis_engine.py",
+      "timestamp": "2026-02-20T11:06:11.336083",
+      "metadata": {}
+    },
+    {
+      "id": 5,
+      "file": "synapse_client.py",
+      "commit_hash": "64b151759b4454ddd66bee73eff226e0c72d64dd",
+      "description": "Translated Azure\u2192CRUSOE: synapse_client.py",
+      "timestamp": "2026-02-20T11:06:58.531800",
+      "metadata": {}
+    },
+    {
+      "id": 6,
+      "file": "llm_query_generator.py",
+      "commit_hash": "f4a8638a30a5ab74a6abe3672ad42f294e73acdb",
+      "description": "Translated Azure\u2192CRUSOE: llm_query_generator.py",
+      "timestamp": "2026-02-20T11:09:23.791496",
+      "metadata": {}
+    },
+    {
+      "id": 7,
+      "file": "download_data.py",
+      "commit_hash": "b6cd038af3f4e075e5252a3b75fc62c7e2d6b357",
+      "description": "Translated Azure\u2192CRUSOE: download_data.py",
+      "timestamp": "2026-02-20T11:12:16.305980",
+      "metadata": {}
+    },
+    {
+      "id": 8,
+      "file": "streamlit_app.py",
+      "commit_hash": "af4e3c79c2cf69159b2894b0db050a85dfc6cf42",
+      "description": "Translated Azure\u2192CRUSOE: streamlit_app.py",
+      "timestamp": "2026-02-20T11:13:14.151577",
+      "metadata": {}
+    },
+    {
+      "id": 9,
+      "file": "generate_taxi_questions_jan.py",
+      "commit_hash": "88f241729d2fdb623278c689db0338e2f1be4298",
+      "description": "Translated Azure\u2192CRUSOE: generate_taxi_questions_jan.py",
+      "timestamp": "2026-02-20T11:14:20.068140",
+      "metadata": {}
+    }
+  ],
+  "last_updated": "2026-02-20T11:14:20.068197"
+}

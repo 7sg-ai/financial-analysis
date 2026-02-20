@@ -39,42 +39,32 @@ spec:
     spec:
       containers:
       - name: streamlit-app
-        image: financialanalysisacr.azurecr.io/financial-analysis-streamlit:latest
+        image: ghcr.io/your-org/financial-analysis-streamlit:latest
         ports:
         - containerPort: 8501
         env:
-        - name: AZURE_OPENAI_ENDPOINT
+        - name: OPENAI_ENDPOINT
           valueFrom:
             secretKeyRef:
-              name: azure-secrets
-              key: openai-endpoint
-        - name: AZURE_OPENAI_API_KEY
+              name: openai-secrets
+              key: endpoint
+        - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
-              name: azure-secrets
-              key: openai-key
+              name: openai-secrets
+              key: api-key
         - name: AZURE_OPENAI_DEPLOYMENT_NAME
           value: "gpt-5.2-chat"
-        - name: SYNAPSE_SPARK_POOL_NAME
+        - name: SPARK_CLUSTER_ID
           valueFrom:
             secretKeyRef:
-              name: azure-secrets
-              key: synapse-spark-pool-name
-        - name: SYNAPSE_WORKSPACE_NAME
+              name: spark-secrets
+              key: cluster-id
+        - name: SPARK_API_KEY
           valueFrom:
             secretKeyRef:
-              name: azure-secrets
-              key: synapse-workspace-name
-        - name: AZURE_SUBSCRIPTION_ID
-          valueFrom:
-            secretKeyRef:
-              name: azure-secrets
-              key: subscription-id
-        - name: AZURE_RESOURCE_GROUP
-          valueFrom:
-            secretKeyRef:
-              name: azure-secrets
-              key: resource-group
+              name: spark-secrets
+              key: api-key
         - name: STREAMLIT_PORT
           value: "8501"
         - name: STREAMLIT_HOST

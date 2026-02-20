@@ -10,7 +10,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-import boto3
+from crusoe import EMRServerlessClient
 from botocore.exceptions import ClientError
 from crusoe import EMRServerlessClient, EMRServerlessError
 
@@ -43,15 +43,13 @@ class SynapseSparkSession:
     def __init__(
         self,
         application_id: str,
-        region_name: str,
+        region_name: str = "crusoe",
         data_path: str,
         storage_bucket: Optional[str] = None,
         storage_prefix: Optional[str] = "logs",
         execution_role_arn: Optional[str] = None,
     ):
-        self._client = boto3.client(
-            "emr-serverless", region_name=region_name
-        )
+        self._client = EMRServerlessClient(region_name=region_name)
         self.application_id = application_id
         self.region_name = region_name
         self.data_path = data_path.rstrip("/")
@@ -93,7 +91,7 @@ class SynapseSparkSession:
 
         logger.info("Creating EMR Serverless Spark session...")
         try:
-            response = self._client.start_job_run(
+            response = self._client.submit_job(
                 applicationId=self.application_id,
                 executionRoleArn=self._execution_role_arn,
                 jobDriver={
@@ -102,12 +100,7 @@ class SynapseSparkSession:
                         "sparkSubmitParameters": spark_submit_params
                     }
                 },
-                configurationOverrides={
-                    "applicationConfiguration": [
-                        {"classification": "spark-defaults", "properties": conf}
-                    ],
-                    "monitoringConfiguration": {
-                        "s3MonitoringConfiguration": {
+                config=confConfiguration": {
                             "logUri": f"s3://{self._storage_bucket}/{self._storage_prefix}/"
                         }
                     }

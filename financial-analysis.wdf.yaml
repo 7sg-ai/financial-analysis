@@ -16,13 +16,13 @@ secrets:
   secretRefs:
   - name: openai-endpoint
     injectAs: env
-    envVar: AZURE_OPENAI_ENDPOINT
+    envVar: OPENAI_ENDPOINT
     externalRef:
       provider: vault
       key: secret/financial-analysis/openai/endpoint
   - name: openai-api-key
     injectAs: env
-    envVar: AZURE_OPENAI_API_KEY
+    envVar: OPENAI_API_KEY
     externalRef:
       provider: vault
       key: secret/financial-analysis/openai/api-key
@@ -86,14 +86,14 @@ dataSources:
     dsdfRef: dsdf/downloaded-taxi-data.dsdf.202602191817.yaml
   - name: taxi-zone-lookup
     dsdfRef: dsdf/taxi-zone-lookup.dsdf.202602191817.yaml
-  - name: azure-synapse-spark
-    dsdfRef: dsdf/azure-synapse-spark.dsdf.202602191817.yaml
+  - name: crusoe-spark
+    dsdfRef: dsdf/crusoe-spark.dsdf.202602191817.yaml
   - name: llm-endpoint
     dsdfRef: dsdf/llm-endpoint.dsdf.202602191817.yaml
   - name: llm-endpoint-crusoe
     dsdfRef: dsdf/llm-endpoint-crusoe.dsdf.202602191817.yaml
-  - name: downloaded-taxi-data-streaming-to-crusoe
-    dsdfRef: dsdf/downloaded-taxi-data-streaming-to-crusoe.dsdf.202602191817.yaml
+  - name: crusoe-storage-data
+    dsdfRef: dsdf/crusoe-storage-data.dsdf.202602191817.yaml
   - name: taxi-data
     dsdfRef: dsdf/taxi-data.dsdf.202602191817.yaml
   outputs: []
@@ -121,7 +121,7 @@ scenarios:
           - name: LOG_LEVEL
             value: INFO
           - name: DATA_PATH
-            value: abfss://<container>@<storage-account>.dfs.core.windows.net/taxi-tripdata
+            value: s3a://crusoe-data-bucket/taxi-tripdata
           - name: AZURE_OPENAI_DEPLOYMENT_NAME
             value: gpt-5.2-chat
           - name: AZURE_OPENAI_API_VERSION

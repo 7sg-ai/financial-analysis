@@ -12,6 +12,7 @@ from openai import OpenAI
 from data_loader import DataLoader
 from response_formatter import AnalysisResponse, ResponseFormatter
 from config import Settings
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +25,14 @@ class FinancialAnalysisEngine:
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self._emr_client = boto3.client("emr-serverless", region_name=settings.aws_region)
+        self._emr_client = boto3.client(
+            "emr-serverless",
+            region_name=settings.aws_region or "us-east-1",
+            aws_access_key_id=settings.aws_access_key_id,
+            aws_secret_access_key=settings.aws_secret_access_key
+        )
         self._openai_client = OpenAI(
-            base_url="https://inference.api.crusoecloud.com/v1",
+            base_url=settings.crusoe_inference_endpoint or "https://inference.api.crusoecloud.com/v1",
             api_key=settings.crusoe_api_key
         )
         self.data_loader = DataLoader()

@@ -8,7 +8,7 @@ import requests
 import time
 from datetime import datetime
 
-API_BASE_URL = "http://financial-analysis-api.d2f6dxb4c0dpgkc4.eastus2.azurecontainer.io:8000"
+API_BASE_URL = "https://inference.api.crusoecloud.com/v1"
 
 # Categories of questions
 QUESTION_TEMPLATES = [

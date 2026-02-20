@@ -20,10 +20,8 @@ class QueryGenerator:
     
     def __init__(
         self,
-        endpoint: str,
         api_key: str,
-        deployment_name: str = "gpt-5.2-chat",
-        api_version: str = "2024-12-01-preview"
+        deployment_name: str = "meta-llama/Meta-Llama-3.1-8B-Instruct"
     ):
         """
         Initialize QueryGenerator

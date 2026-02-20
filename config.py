@@ -10,22 +10,17 @@ import os
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
     
-    # Azure OpenAI Configuration
-    azure_openai_endpoint: str = Field(..., env="AZURE_OPENAI_ENDPOINT")
-    azure_openai_api_key: str = Field(..., env="AZURE_OPENAI_API_KEY")
-    azure_openai_deployment_name: str = Field(default="gpt-5.2-chat", env="AZURE_OPENAI_DEPLOYMENT_NAME")
-    azure_openai_api_version: str = Field(default="2024-12-01-preview", env="AZURE_OPENAI_API_VERSION")
+    # AWS Bedrock Configuration
+    aws_region: str = Field(..., env="AWS_REGION")
+    aws_access_key_id: Optional[str] = Field(default=None, env="AWS_ACCESS_KEY_ID")
+    bedrock_model_id: str = Field(default="meta.llama3-2-3b-instruct-v1:0", env="BEDROCK_MODEL_ID")
     
-    # Azure Synapse Configuration (Required)
-    synapse_spark_pool_name: str = Field(..., env="SYNAPSE_SPARK_POOL_NAME")
-    synapse_workspace_name: str = Field(..., env="SYNAPSE_WORKSPACE_NAME")
-    azure_subscription_id: str = Field(..., env="AZURE_SUBSCRIPTION_ID")
-    azure_resource_group: str = Field(..., env="AZURE_RESOURCE_GROUP")
+    # AWS EMR Serverless Configuration (Required)
+    emr_application_id: str = Field(..., env="EMR_APPLICATION_ID")
+    aws_account_id: str = Field(..., env="AWS_ACCOUNT_ID")
     
-    # Azure Storage Configuration
-    azure_storage_account_name: Optional[str] = Field(default=None, env="AZURE_STORAGE_ACCOUNT_NAME")
-    azure_storage_account_key: Optional[str] = Field(default=None, env="AZURE_STORAGE_ACCOUNT_KEY")
-    azure_storage_container: Optional[str] = Field(default=None, env="AZURE_STORAGE_CONTAINER")
+    # AWS S3 Configuration
+    s3_bucket_name: Optional[str] = Field(default=None, env="S3_BUCKET_NAME")
     
     # Application Configuration
     data_path: str = Field(default="./src_data", env="DATA_PATH")
@@ -53,4 +48,3 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get application settings instance"""
     return Settings()
-

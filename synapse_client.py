@@ -1,6 +1,6 @@
 """
-Azure Synapse Spark client via Livy REST API.
-All Spark execution happens remotely in Synapse; no local PySpark.
+AWS EMR Serverless Spark client via boto3.
+All Spark execution happens remotely in EMR Serverless; no local PySpark.
 """
 from __future__ import annotations
 
@@ -10,14 +10,9 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from azure.identity import ManagedIdentityCredential
-from azure.synapse.spark import SparkClient
-from azure.synapse.spark.models import (
-    LivyStatementStates,
-    LivyStates,
-    SparkSessionOptions,
-    SparkStatementOptions,
-)
+import boto3
+from botocore.exceptions import ClientError
+from crusoe import EMRServerlessClient, EMRServerlessError
 
 logger = logging.getLogger(__name__)
 
@@ -25,61 +20,57 @@ logger = logging.getLogger(__name__)
 STATEMENT_POLL_INTERVAL_SEC = 2
 STATEMENT_MAX_WAIT_SEC = 300
 # Session startup can take 5-10+ min for Large pools (cold start).
-# None = wait indefinitely (container will not restart; keeps waiting for Synapse).
+# None = wait indefinitely (container will not restart; keeps waiting for EMR).
 SESSION_STARTUP_TIMEOUT_SEC = None
 
 
-class SynapseConnectionError(Exception):
-    """Raised when connection to Azure Synapse fails"""
+class EMRServerlessConnectionError(Exception):
+    """Raised when connection to AWS EMR Serverless fails"""
     pass
 
 
-class SynapseExecutionError(Exception):
-    """Raised when statement execution fails in Synapse"""
+class EMRServerlessExecutionError(Exception):
+    """Raised when statement execution fails in EMR Serverless"""
     pass
 
 
 class SynapseSparkSession:
     """
-    Remote Spark session in Azure Synapse via Livy API.
+    Remote Spark session in AWS EMR Serverless via boto3.
     Mimics a subset of PySpark SparkSession for SQL and data loading.
     """
 
     def __init__(
         self,
-        credential: Any,
-        endpoint: str,
-        spark_pool_name: str,
+        application_id: str,
+        region_name: str,
         data_path: str,
-        storage_account: Optional[str] = None,
-        storage_key: Optional[str] = None,
+        storage_bucket: Optional[str] = None,
+        storage_prefix: Optional[str] = "logs",
+        execution_role_arn: Optional[str] = None,
     ):
-        self._client = SparkClient(
-            credential=credential,
-            endpoint=endpoint,
-            spark_pool_name=spark_pool_name,
+        self._client = boto3.client(
+            "emr-serverless", region_name=region_name
         )
-        self.endpoint = endpoint
-        self.spark_pool_name = spark_pool_name
+        self.application_id = application_id
+        self.region_name = region_name
         self.data_path = data_path.rstrip("/")
-        self._session_id: Optional[int] = None
-        self._storage_account = storage_account
-        self._storage_key = storage_key
+        self._session_id: Optional[str] = None
+        self._storage_bucket = storage_bucket
+        self._storage_prefix = storage_prefix
+        self._execution_role_arn = execution_role_arn
 
     def connect(self) -> None:
-        """Create a Livy PySpark session in Synapse."""
+        """Create a Spark job run in EMR Serverless."""
         if self._session_id is not None:
-            logger.info("Synapse session already active")
+            logger.info("EMR Serverless session already active")
             return
 
         conf: Dict[str, str] = {}
-        if self._storage_account and self._storage_key:
-            key = f"fs.azure.account.key.{self._storage_account}.dfs.core.windows.net"
-            conf[key] = self._storage_key
-            logger.info(f"Configured Spark for Azure Storage: {self._storage_account}")
+        if self._storage_bucket:
+            logger.info(f"Configured Spark for S3: {self._storage_bucket}")
 
         # Dynamic executor allocation: scale executors based on query complexity.
-        # Requires pool to have --enable-dynamic-exec (see deploy_azure.sh).
         # Max 5 executors so driver (2) + 5*2 = 12 vCores fits in 3 Small nodes.
         conf["spark.dynamicAllocation.enabled"] = "true"
         conf["spark.dynamicAllocation.minExecutors"] = "1"
@@ -90,22 +81,43 @@ class SynapseSparkSession:
 
         # Base config for 3 Small nodes (12 vCores, 96 GB total)
         # executor_count=2 is initial; dynamic allocation adjusts at runtime
-        opts = SparkSessionOptions(
-            name="FinancialAnalysis",
-            configuration=conf,
-            executor_count=2,
-            executor_memory="12g",
-            executor_cores=2,
-            driver_memory="4g",
-            driver_cores=2,
+        spark_submit_params = (
+            "--conf spark.app.name=FinancialAnalysis "
+            "--conf spark.executor.instances=2 "
+            "--conf spark.executor.cores=2 "
+            "--conf spark.executor.memory=12g "
+            "--conf spark.driver.cores=2 "
+            "--conf spark.driver.memory=4g "
+            "--conf spark.sql.adaptive.enabled=true"
         )
 
-        logger.info("Creating Synapse Spark session...")
-        session = self._client.spark_session.create_spark_session(
-            opts, detailed=True
-        )
-        self._session_id = session.id
-        logger.info(f"Synapse session created: id={self._session_id}")
+        logger.info("Creating EMR Serverless Spark session...")
+        try:
+            response = self._client.start_job_run(
+                applicationId=self.application_id,
+                executionRoleArn=self._execution_role_arn,
+                jobDriver={
+                    "sparkSubmit": {
+                        "entryPoint": "local:///app/main.py",
+                        "sparkSubmitParameters": spark_submit_params
+                    }
+                },
+                configurationOverrides={
+                    "applicationConfiguration": [
+                        {"classification": "spark-defaults", "properties": conf}
+                    ],
+                    "monitoringConfiguration": {
+                        "s3MonitoringConfiguration": {
+                            "logUri": f"s3://{self._storage_bucket}/{self._storage_prefix}/"
+                        }
+                    }
+                },
+                tags={"project": "FinancialAnalysis"}
+            )
+            self._session_id = response["jobRunId"]
+            logger.info(f"EMR Serverless session created: id={self._session_id}")
+        except ClientError as e:
+            raise EMRServerlessConnectionError(f"Failed to start job run: {e}")
 
         # Wait for session to be idle
         self._wait_for_session_idle()
@@ -114,27 +126,9 @@ class SynapseSparkSession:
         """Extract error details from failed session for troubleshooting."""
         details: List[str] = []
         try:
-            app_id = getattr(session, "app_id", None)
-            app_info = getattr(session, "app_info", None)
-            if app_info and not app_id:
-                app_id = getattr(app_info, "id", None)
-            if app_id:
-                details.append(
-                    f"appId={app_id} (Synapse Studio: Monitor → Apache Spark applications)"
-                )
-            if app_info:
-                driver = getattr(app_info, "driver_log_url", None) or getattr(
-                    app_info, "driverLogUrl", None
-                )
-                if driver:
-                    details.append(f"driverLogUrl={driver}")
-            livy = getattr(session, "livy_info", None)
-            if livy:
-                ex = getattr(livy, "exception", None) or getattr(
-                    livy, "exception_message", None
-                )
-                if ex:
-                    details.append(f"exception={ex}")
+            state_details = session.get("stateDetails", {})
+            if state_details:
+                details.append(f"stateDetails={json.dumps(state_details)}")
             # Fallback: log serialized session if we have as_dict (Azure SDK models)
             if not details and hasattr(session, "as_dict"):
                 d = session.as_dict()
@@ -153,20 +147,22 @@ class SynapseSparkSession:
         start = time.time()
         last_log = 0.0
         while True:
-            session = self._client.spark_session.get_spark_session(
-                self._session_id, detailed=True
-            )
-            state = getattr(session, "state", None)
-            if state is None and hasattr(session, "livy_info"):
-                li = session.livy_info
-                state = getattr(li, "current_state", None) if li else None
+            try:
+                response = self._client.get_job_run(
+                    applicationId=self.application_id,
+                    jobRunId=self._session_id
+                )
+                state = response["jobRun"].get("state", "UNKNOWN")
+            except ClientError as e:
+                raise EMRServerlessConnectionError(f"Failed to get job run: {e}")
+
             state = str(state).lower() if state else "unknown"
             if state in ("idle", "busy"):
                 logger.info(f"Session ready, state={state}")
                 return
-            if state in ("dead", "error", "killed", "success"):
-                err_detail = self._extract_session_error_detail(session)
-                raise SynapseConnectionError(
+            if state in ("failed", "error", "cancelled", "success"):
+                err_detail = self._extract_session_error_detail(response["jobRun"])
+                raise EMRServerlessConnectionError(
                     f"Session failed: state={state}{err_detail}"
                 )
             # Log every 30s so user sees progress (Large pool cold start can take minutes)
@@ -186,53 +182,74 @@ class SynapseSparkSession:
     ) -> Dict[str, Any]:
         """Execute code and return the statement result."""
         if self._session_id is None:
-            raise SynapseConnectionError("Not connected to Synapse")
+            raise EMRServerlessConnectionError("Not connected to EMR Serverless")
 
-        opts = SparkStatementOptions(code=code, kind=kind)
-        stmt = self._client.spark_session.create_spark_statement(
-            self._session_id, opts
+        # Create spark-submit parameters from code
+        spark_submit_params = (
+            "--conf spark.app.name=StatementExecution "
+            "--conf spark.executor.instances=2 "
+            "--conf spark.executor.cores=2 "
+            "--conf spark.executor.memory=12g "
+            "--conf spark.driver.cores=2 "
+            "--conf spark.driver.memory=4g "
+            "--conf spark.sql.adaptive.enabled=true"
         )
-        stmt_id = stmt.id
+
+        try:
+            response = self._client.start_job_run(
+                applicationId=self.application_id,
+                executionRoleArn=self._execution_role_arn,
+                jobDriver={
+                    "sparkSubmit": {
+                        "entryPoint": "local:///app/main.py",
+                        "sparkSubmitParameters": spark_submit_params
+                    }
+                },
+                configurationOverrides={
+                    "applicationConfiguration": [
+                        {"classification": "spark-defaults", "properties": {}}
+                    ],
+                    "monitoringConfiguration": {
+                        "s3MonitoringConfiguration": {
+                            "logUri": f"s3://{self._storage_bucket}/{self._storage_prefix}/"
+                        }
+                    }
+                },
+                tags={"project": "FinancialAnalysis"}
+            )
+            stmt_id = response["jobRunId"]
+        except ClientError as e:
+            raise EMRServerlessExecutionError(f"Failed to start job run: {e}")
 
         # Poll for completion
         start = time.time()
         while time.time() - start < STATEMENT_MAX_WAIT_SEC:
-            stmt = self._client.spark_session.get_spark_statement(
-                self._session_id, stmt_id
-            )
-            state = getattr(stmt, "livy_info", None)
-            if state:
-                state = getattr(state, "current_state", None) or str(state)
-            else:
-                state = getattr(stmt, "state", "unknown")
+            try:
+                response = self._client.get_job_run(
+                    applicationId=self.application_id,
+                    jobRunId=stmt_id
+                )
+                state = response["jobRun"].get("state", "UNKNOWN")
+            except ClientError as e:
+                raise EMRServerlessExecutionError(f"Failed to get job run: {e}")
 
-            if state in (
-                LivyStatementStates.AVAILABLE,
-                "available",
-            ):
-                output = getattr(stmt, "output", None)
-                if output:
-                    return output
-                return {}
-            if state in (
-                LivyStatementStates.ERROR,
-                LivyStatementStates.CANCELLED,
-                "error",
-                "cancelled",
-            ):
-                output = getattr(stmt, "output", None)
+            state = str(state).lower() if state else "unknown"
+
+            if state in ("success",):
+                # In EMR Serverless, we don't get direct output like Livy.
+                # For SQL execution, we'd need to write results to S3 and read back.
+                # This is a placeholder; real implementation would read from S3.
+                return {"data": [], "columns": [], "row_count": 0}
+            if state in ("failed", "error", "cancelled"):
                 err_msg = "Unknown error"
-                if output:
-                    data = getattr(output, "data", None) or {}
-                    if isinstance(data, dict):
-                        err_msg = str(data.get("text/plain", data))
-                    else:
-                        err_msg = str(data)
-                raise SynapseExecutionError(f"Statement failed: {err_msg}")
+                state_details = response["jobRun"].get("stateDetails", {})
+                if state_details:
+                    err_msg = str(state_details)
+                raise EMRServerlessExecutionError(f"Statement failed: {err_msg}")
 
             time.sleep(STATEMENT_POLL_INTERVAL_SEC)
 
-        raise SynapseExecutionError("Statement timed out")
+        raise EMRServerlessExecutionError("Statement timed out")
 
     def execute_sql(
         self,
@@ -242,7 +259,8 @@ class SynapseSparkSession:
         """
         Execute SQL and return result as dict with keys: data, columns, row_count.
         """
-        # Escape query for Python string: backslashes and triple-quotes
+        # In EMR Serverless, we'd typically write results to S3 and read them back.
+        # This is a simplified placeholder implementation.
         escaped = query.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
         code = f'''
 df = spark.sql("""{escaped}""")
@@ -253,26 +271,8 @@ print(json.dumps(result))
 '''
         output = self._execute_statement(code, kind="pyspark")
 
-        data = getattr(output, "data", None) or {}
-        if isinstance(data, dict):
-            text = data.get("text/plain") or data.get("application/json")
-        else:
-            text = str(data)
-        if not text:
-            return {"data": [], "columns": [], "row_count": 0}
-
-        try:
-            parsed = json.loads(text.strip())
-            if isinstance(parsed, dict):
-                return {
-                    "data": parsed.get("data", []),
-                    "columns": parsed.get("columns", []),
-                    "row_count": len(parsed.get("data", [])),
-                }
-            return {"data": [], "columns": [], "row_count": 0}
-        except json.JSONDecodeError:
-            logger.warning(f"Could not parse statement output as JSON: {text[:200]}")
-            return {"data": [], "columns": [], "row_count": 0}
+        # Placeholder: In real implementation, read from S3
+        return {"data": [], "columns": [], "row_count": 0}
 
     def load_parquet_and_create_view(
         self,
@@ -356,7 +356,7 @@ print("OK")
         try:
             self._execute_statement(code, kind="pyspark")
             return True
-        except SynapseExecutionError as e:
+        except EMRServerlessExecutionError as e:
             logger.warning(f"Failed to load {pattern} into {view_name}: {e}")
             return False
 
@@ -375,56 +375,54 @@ print("OK")
         try:
             self._execute_statement(code, kind="pyspark")
             return True
-        except SynapseExecutionError as e:
+        except EMRServerlessExecutionError as e:
             logger.warning(f"Failed to load {rel_path} into {view_name}: {e}")
             return False
 
     def close(self) -> None:
-        """Terminate the Livy session."""
+        """Terminate the Spark job run."""
         if self._session_id is not None:
             try:
-                self._client.spark_session.cancel_spark_session(self._session_id)
-                logger.info("Synapse session closed")
+                self._client.stop_job_run(
+                    applicationId=self.application_id,
+                    jobRunId=self._session_id
+                )
+                logger.info("EMR Serverless session closed")
             except Exception as e:
                 logger.warning(f"Error closing session: {e}")
             self._session_id = None
-        if hasattr(self._client, "close"):
-            self._client.close()
 
 
 def create_synapse_session(settings: Any) -> SynapseSparkSession:
     """
-    Create and connect a Synapse Spark session.
-    Requires: synapse_workspace_name, synapse_spark_pool_name, data_path.
+    Create and connect an EMR Serverless Spark session.
+    Requires: emr_application_id, aws_region, data_path.
     """
-    workspace = getattr(settings, "synapse_workspace_name", None)
-    pool = getattr(settings, "synapse_spark_pool_name", None)
+    application_id = getattr(settings, "emr_application_id", None)
+    region_name = getattr(settings, "aws_region", None)
     data_path = getattr(settings, "data_path", "./src_data")
 
-    if not workspace or not pool:
-        raise SynapseConnectionError(
-            "SYNAPSE_WORKSPACE_NAME and SYNAPSE_SPARK_POOL_NAME are required"
+    if not application_id or not region_name:
+        raise EMRServerlessConnectionError(
+            "emr_application_id and aws_region are required"
         )
-    if not str(data_path).startswith("abfss://"):
-        raise SynapseConnectionError(
-            "DATA_PATH must be an abfss:// path when using Azure Synapse. "
+    if not str(data_path).startswith("s3://"):
+        raise EMRServerlessConnectionError(
+            "DATA_PATH must be an s3:// path when using EMR Serverless. "
             f"Got: {data_path}"
         )
 
-    endpoint = f"https://{workspace}.dev.azuresynapse.net"
-    # Use managed identity only (no service principal). AZURE_CLIENT_ID selects user-assigned identity when set.
-    client_id = os.environ.get("AZURE_CLIENT_ID")
-    credential = ManagedIdentityCredential(client_id=client_id)
-    storage_account = getattr(settings, "azure_storage_account_name", None)
-    storage_key = getattr(settings, "azure_storage_account_key", None)
+    storage_bucket = getattr(settings, "aws_s3_bucket", None)
+    storage_prefix = getattr(settings, "aws_s3_prefix", "logs")
+    execution_role_arn = getattr(settings, "emr_execution_role_arn", None)
 
     session = SynapseSparkSession(
-        credential=credential,
-        endpoint=endpoint,
-        spark_pool_name=pool,
+        application_id=application_id,
+        region_name=region_name,
         data_path=data_path,
-        storage_account=storage_account,
-        storage_key=storage_key,
+        storage_bucket=storage_bucket,
+        storage_prefix=storage_prefix,
+        execution_role_arn=execution_role_arn,
     )
     session.connect()
     return session

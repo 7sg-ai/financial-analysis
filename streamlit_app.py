@@ -11,6 +11,8 @@ import json
 import time
 import logging
 from typing import Dict, Any, List, Optional
+import os
+import requests
 
 # Configure logging - set to DEBUG for troubleshooting
 logging.basicConfig(
@@ -70,8 +72,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Initialize session state
-import os
-
 # Always read API_URL from environment variable (can change between restarts)
 # This ensures the app uses the latest environment variable value
 env_api_url = os.getenv("API_URL", "http://localhost:8000")
@@ -97,8 +97,7 @@ logger.info(f"Using API URL: {st.session_state.api_url} (from env: {env_api_url}
 def check_api_health():
     """Check if the API backend is available"""
     try:
-        import httpx
-        response = httpx.get(f"{st.session_state.api_url}/health", timeout=5.0)
+        response = requests.get(f"{st.session_state.api_url}/health", timeout=5.0)
         st.session_state.api_available = response.status_code == 200
         return st.session_state.api_available
     except Exception as e:
@@ -138,7 +137,6 @@ def call_api(question: str, return_format: str = "both", include_narrative: bool
             return None
     
     try:
-        import httpx
         request_payload = {
             "question": question,
             "return_format": return_format,
@@ -148,7 +146,7 @@ def call_api(question: str, return_format: str = "both", include_narrative: bool
         logger.debug(f"Sending POST request to {st.session_state.api_url}/api/analyze")
         logger.debug(f"Request payload: {request_payload}")
         
-        response = httpx.post(
+        response = requests.post(
             f"{st.session_state.api_url}/api/analyze",
             json=request_payload,
             timeout=300.0  # 5 minute timeout for long queries
@@ -172,7 +170,7 @@ def call_api(question: str, return_format: str = "both", include_narrative: bool
             logger.debug(f"Full response structure: {response_json}")
         
         return response_json
-    except httpx.HTTPError as e:
+    except requests.exceptions.HTTPError as e:
         logger.error(f"API HTTP Error: {str(e)}")
         logger.error(f"Response status: {e.response.status_code if hasattr(e, 'response') else 'N/A'}")
         logger.error(f"Response text: {e.response.text if hasattr(e, 'response') and hasattr(e.response, 'text') else 'N/A'}")
@@ -275,7 +273,6 @@ def create_visualizations(df: pd.DataFrame, results: Dict[str, Any]):
                 title=f"Distribution by {categorical_cols[0]}"
             )
             st.plotly_chart(fig, use_container_width=True)
-
 def main():
     """Main Streamlit application"""
     
@@ -349,8 +346,8 @@ def main():
         if st.session_state.api_available:
             st.markdown("### 📊 Data Info")
             try:
-                import httpx
-                r = httpx.get(f"{st.session_state.api_url}/api/data-status", timeout=10.0)
+                import requests
+                r = requests.get(f"{st.session_state.api_url}/api/data-status", timeout=10)
                 if r.status_code == 200:
                     data = r.json()
                     for view_name, detail in data.get("views", {}).get("details", {}).items():

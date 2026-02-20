@@ -1,12 +1,14 @@
 """
 Main analysis engine that orchestrates all components
 Integrates query generation, execution, and response formatting
-Uses Azure Synapse Spark exclusively (no local PySpark).
+Uses AWS EMR Serverless and Bedrock exclusively (no local PySpark).
 """
-from typing import Dict, Any, Optional, List
+import boto3
+import json
 import logging
+from typing import Dict, Any, Optional, List
+from botocore.exceptions import ClientError
 
-from synapse_client import create_synapse_session, SynapseConnectionError
 from data_loader import DataLoader
 from llm_query_generator import QueryGenerator, NarrativeGenerator
 from query_executor import QueryExecutor
@@ -19,29 +21,30 @@ logger = logging.getLogger(__name__)
 class FinancialAnalysisEngine:
     """
     Main engine for financial analysis queries.
-    All Spark execution runs in Azure Synapse.
+    All Spark execution runs in AWS EMR Serverless.
     """
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self._session = create_synapse_session(settings)
-        self.data_loader = DataLoader(self._session)
+        self._emr_client = boto3.client("emr-serverless", region_name=settings.aws_region)
+        self._application_id = settings.emr_application_id
+        self._execution_role_arn = settings.emr_execution_role_arn
+        self._bedrock_client = boto3.client("bedrock-runtime", region_name=settings.aws_region)
+        self._query_model_id = "meta.llama3-2-3b-instruct-v1:0"
+        self._narrative_model_id = "meta.llama3-2-3b-instruct-v1:0"
+        self._max_result_rows = 1000
+        self.data_loader = DataLoader(self._emr_client, self._application_id, self._execution_role_arn)
         self.query_generator = QueryGenerator(
-            endpoint=settings.azure_openai_endpoint,
-            api_key=settings.azure_openai_api_key,
-            deployment_name=settings.azure_openai_deployment_name,
-            api_version=settings.azure_openai_api_version,
+            bedrock_client=self._bedrock_client,
+            model_id=self._query_model_id
         )
         self.narrative_generator = NarrativeGenerator(
-            endpoint=settings.azure_openai_endpoint,
-            api_key=settings.azure_openai_api_key,
-            deployment_name=settings.azure_openai_deployment_name,
-            api_version=settings.azure_openai_api_version,
+            bedrock_client=self._bedrock_client,
+            model_id=self._narrative_model_id
         )
-        self.query_executor = QueryExecutor(self._session, max_result_rows=1000)
         self.response_formatter = ResponseFormatter()
         self._data_loaded = False
-        logger.info("FinancialAnalysisEngine initialized (Azure Synapse)")
+        logger.info("FinancialAnalysisEngine initialized (AWS EMR Serverless)")
     
     def initialize_data(
         self,
@@ -74,11 +77,10 @@ class FinancialAnalysisEngine:
         year: Optional[str] = None,
     ) -> bool:
         """
-        Reload data and re-register views in Synapse.
-        With Synapse we always attempt reload when called.
+        Reload data and re-register views in EMR Serverless.
+        With EMR Serverless we always attempt reload when called.
         """
-        self.data_loader.clear_cache()
-        logger.info("Reloading data in Synapse...")
+        logger.info("Reloading data in EMR Serverless...")
         success = self.data_loader.register_temp_views(months=months, year=year)
         if success:
             self._data_loaded = True
@@ -150,7 +152,7 @@ class FinancialAnalysisEngine:
             # Step 3: Execute query
             logger.info("Executing query...")
             logger.debug(f"Executing SQL query: {query}")
-            execution_result = self.query_executor.execute_query(
+            execution_result = self.data_loader.execute_query(
                 query=query,
                 max_rows=max_rows
             )
@@ -275,7 +277,7 @@ class FinancialAnalysisEngine:
                 )
             
             # Execute
-            execution_result = self.query_executor.execute_query(query)
+            execution_result = self.data_loader.execute_query(query)
             
             if not execution_result['success']:
                 error_msg = execution_result.get('error', 'Unknown error')
@@ -359,14 +361,10 @@ class FinancialAnalysisEngine:
         Returns:
             List of query history entries
         """
-        return self.query_executor.get_query_history(limit=limit)
+        return self.data_loader.get_query_history(limit=limit)
     
     def shutdown(self) -> None:
-        """Shutdown the engine and close Synapse session."""
+        """Shutdown the engine and clean up resources."""
         logger.info("Shutting down FinancialAnalysisEngine")
-        try:
-            self._session.close()
-            logger.info("Synapse session closed")
-        except Exception as e:
-            logger.error(f"Error closing Synapse session: {e}")
-
+        # EMR Serverless handles resource cleanup automatically
+        logger.info("EMR Serverless resources managed automatically by AWS")

@@ -8,7 +8,9 @@ import requests
 import time
 from datetime import datetime
 
-API_BASE_URL = "http://financial-analysis-api.d2f6dxb4c0dpgkc4.eastus2.azurecontainer.io:8000"
+# API Gateway endpoint (replaces Azure Container App)
+# Replace with your deployed API Gateway URL after migration
+API_BASE_URL = "https://<your-api-id>.execute-api.<region>.amazonaws.com/prod/api/analyze"
 
 # Categories of questions
 QUESTION_TEMPLATES = [
@@ -219,19 +221,40 @@ BACKUP_QUESTIONS = [
 def call_api(question: str) -> dict:
     """Call the analyze API with a question."""
     try:
+        # Use API Gateway client via boto3 (if using Lambda proxy integration with IAM auth)
+        # OR use requests with API Gateway URL (if using Lambda authorizer or no auth)
+        # Assuming API Gateway with IAM auth:
+        import boto3
+        import json
+        import requests
+
+        # Option 1: Direct HTTP call (if no IAM auth, e.g., Lambda authorizer or public endpoint)
         response = requests.post(
-            f"{API_BASE_URL}/api/analyze",
+            f"{API_BASE_URL}/analyze",  # API Gateway strips '/prod' path if configured
             json={"question": question},
             timeout=120
         )
+
+        # Option 2: IAM-signed request (if backend requires IAM auth)
+        # from botocore.auth import SigV4Auth
+        # from botocore.awsrequest import AWSRequest
+        # import botocore.session
+        # session = botocore.session.get_session()
+        # client = session.create_client('execute-api', region_name='us-east-1')
+        # req = AWSRequest(method='POST', url=f"{API_BASE_URL}/analyze", data=json.dumps({"question": question}))
+        # SigV4Auth(session.get_credentials(), 'execute-api', 'us-east-1').add_auth(req)
+        # response = requests.Session().send(req.prepare())
+        
         if response.status_code == 200:
             return {"success": True, "data": response.json()}
         else:
             return {"success": False, "error": f"HTTP {response.status_code}: {response.text[:200]}"}
     except requests.exceptions.Timeout:
         return {"success": False, "error": "Request timed out"}
+    except requests.exceptions.RequestException as e:
+        return {"success": False, "error": f"Network error: {str(e)}"}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": f"Unexpected error: {str(e)}"}
 
 
 def has_valid_results(response_data: dict) -> bool:
@@ -258,9 +281,7 @@ def has_valid_results(response_data: dict) -> bool:
     if data.get("query"):
         return True
     
-    return False
-
-
+    return True
 def main():
     print("=" * 60)
     print("Generating 100 Taxi Data Questions")

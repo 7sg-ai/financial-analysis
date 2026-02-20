@@ -10,9 +10,9 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from crusoe import EMRServerlessClient
+from crusoe import Client as EMRServerlessClient
 from botocore.exceptions import ClientError
-from crusoe import EMRServerlessClient, EMRServerlessError
+from crusoe import Client as EMRServerlessClient, EMRServerlessError
 
 logger = logging.getLogger(__name__)
 

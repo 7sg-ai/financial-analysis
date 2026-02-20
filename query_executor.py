@@ -88,7 +88,7 @@ class QueryExecutor:
                 result["success"] = True
                 self._add_to_history(query, True, result["execution_time_ms"], result["row_count"])
                 logger.info(f"Query succeeded: {result['row_count']} rows, {result['execution_time_ms']}ms")
-            except ClientError as e:
+            except Exception as e:
                 raise RuntimeError(f"EMR Serverless job failed: {e}")
         except RuntimeError as e:
             result["error"] = str(e)
@@ -149,9 +149,9 @@ class QueryExecutor:
         """Get execution plan via EXPLAIN."""
         try:
             try:
-                response = self.emr_client.start_job_run(
-                    applicationId=self.emr_application_id,
-                    executionRoleArn=self.execution_role_arn,
+                response = self.spark_client.submit_job(
+                    applicationId=self.cluster_id,
+                    executionRoleArn=self.api_key,
                     jobDriver={
                         'sparkSubmit': {
                             'entryPoint': 'local:///usr/lib/spark/examples/src/main/python/sql/QueryPlanExample.py',
@@ -171,7 +171,7 @@ class QueryExecutor:
                 for row in r.get("data", []):
                     lines.append(str(row))
                 return "\n".join(lines) if lines else "No plan returned"
-            except ClientError as e:
+            except Exception as e:
                 raise RuntimeError(f"EMR Serverless EXPLAIN job failed: {e}")
         except RuntimeError as e:
             return f"Error: {e}"

@@ -16,12 +16,12 @@ class DataLoader:
     """
 
     def __init__(self, s3_bucket: str, s3_prefix: str = ""):
-        import boto3
-        from botocore.exceptions import ClientError
+        from crusoe import Client
+        from crusoe.exceptions import CrusoeError
         
-        self.emr_client = boto3.client('emr-serverless', region_name=aws_region)
-        self.emr_application_id = emr_application_id
-        self.execution_role_arn = execution_role_arn
+        self.emr_client = Client().emr(), region_name=crusoe_region)
+        self.crusoe_application_id = emr_application_id
+        self.crusoe_execution_role = crusoe_execution_role
 
     def clear_cache(self) -> None:
         """No-op for EMR Serverless (views are server-side); kept for API compatibility."""
@@ -48,8 +48,8 @@ class DataLoader:
         pattern = "yellow_tripdata_*-*.parquet" if not year else f"yellow_tripdata_{year}-*.parquet"
         try:
             self._load_parquet_to_temp_view(
-                applicationId=self.emr_application_id,
-                executionRoleArn=self.execution_role_arn,
+                applicationId=self.crusoe_application_id,
+                executionRoleArn=self.crusoe_execution_role,
                 jobDriver={
                     'sparkSubmit': {
                         'entryPoint': 'crusoe://data/scripts/load_parquet.py',
@@ -79,12 +79,12 @@ class DataLoader:
         pattern = "green_tripdata_*-*.parquet" if not year else f"green_tripdata_{year}-*.parquet"
         try:
             response = self.emr_client.start_job_run(
-                applicationId=self.emr_application_id,
-                executionRoleArn=self.execution_role_arn,
+                applicationId=self.crusoe_application_id,
+                executionRoleArn=self.crusoe_execution_role,
                 jobDriver={
                     'sparkSubmit': {
-                        'entryPoint': 's3://<bucket>/scripts/load_parquet.py',
-                        'sparkSubmitParameters': f'--conf spark.app.name=load_green_taxi --conf spark.sql.sources.partitionOverwriteMode=dynamic s3://<bucket>/data/{pattern} green_taxi {months}'
+                        'entryPoint': 'crusoe://data/scripts/load_parquet.py',
+                        'sparkSubmitParameters': f'--conf spark.app.name=load_green_taxi --conf spark.sql.sources.partitionOverwriteMode=dynamic crusoe://data/data/{pattern} green_taxi {months}'
                     }
                 },
                 configurationOverrides={
@@ -110,12 +110,12 @@ class DataLoader:
         pattern = "fhv_tripdata_*-*.parquet" if not year else f"fhv_tripdata_{year}-*.parquet"
         try:
             response = self.emr_client.start_job_run(
-                applicationId=self.emr_application_id,
-                executionRoleArn=self.execution_role_arn,
+                applicationId=self.crusoe_application_id,
+                executionRoleArn=self.crusoe_execution_role,
                 jobDriver={
                     'sparkSubmit': {
-                        'entryPoint': 's3://<bucket>/scripts/load_parquet.py',
-                        'sparkSubmitParameters': f'--conf spark.app.name=load_fhv --conf spark.sql.sources.partitionOverwriteMode=dynamic s3://<bucket>/data/{pattern} fhv {months}'
+                        'entryPoint': 'crusoe://data/scripts/load_parquet.py',
+                        'sparkSubmitParameters': f'--conf spark.app.name=load_fhv --conf spark.sql.sources.partitionOverwriteMode=dynamic crusoe://data/data/{pattern} fhv {months}'
                     }
                 },
                 configurationOverrides={
@@ -141,12 +141,12 @@ class DataLoader:
         pattern = "fhvhv_tripdata_*-*.parquet" if not year else f"fhvhv_tripdata_{year}-*.parquet"
         try:
             response = self.emr_client.start_job_run(
-                applicationId=self.emr_application_id,
-                executionRoleArn=self.execution_role_arn,
+                applicationId=self.crusoe_application_id,
+                executionRoleArn=self.crusoe_execution_role,
                 jobDriver={
                     'sparkSubmit': {
-                        'entryPoint': 's3://<bucket>/scripts/load_parquet.py',
-                        'sparkSubmitParameters': f'--conf spark.app.name=load_fhvhv --conf spark.sql.sources.partitionOverwriteMode=dynamic s3://<bucket>/data/{pattern} fhvhv {months}'
+                        'entryPoint': 'crusoe://data/scripts/load_parquet.py',
+                        'sparkSubmitParameters': f'--conf spark.app.name=load_fhvhv --conf spark.sql.sources.partitionOverwriteMode=dynamic crusoe://data/data/{pattern} fhvhv {months}'
                     }
                 },
                 configurationOverrides={
@@ -171,12 +171,12 @@ class DataLoader:
 
         try:
             response = self.emr_client.start_job_run(
-                applicationId=self.emr_application_id,
-                executionRoleArn=self.execution_role_arn,
+                applicationId=self.crusoe_application_id,
+                executionRoleArn=self.crusoe_execution_role,
                 jobDriver={
                     'sparkSubmit': {
-                        'entryPoint': 's3://<bucket>/scripts/load_csv.py',
-                        'sparkSubmitParameters': f'--conf spark.app.name=load_taxi_zones s3://<bucket>/data/taxi_zone_lookup.csv taxi_zones'
+                        'entryPoint': 'crusoe://data/scripts/load_csv.py',
+                        'sparkSubmitParameters': f'--conf spark.app.name=load_taxi_zones crusoe://data/data/taxi_zone_lookup.csv taxi_zones'
                     }
                 },
                 configurationOverrides={
@@ -216,12 +216,12 @@ class DataLoader:
                 # Query sample data
                 try:
                     response = self.emr_client.start_job_run(
-                        applicationId=self.emr_application_id,
-                        executionRoleArn=self.execution_role_arn,
+                        applicationId=self.crusoe_application_id,
+                        executionRoleArn=self.crusoe_execution_role,
                         jobDriver={
                             'sparkSubmit': {
-                                'entryPoint': 's3://<bucket>/scripts/query_sample.py',
-                                'sparkSubmitParameters': f'--conf spark.app.name=query_sample_{view} --conf spark.sql.adaptive.enabled=true s3://<bucket>/scripts/query_sample.py {view}'
+                                'entryPoint': 'crusoe://data/scripts/query_sample.py',
+                                'sparkSubmitParameters': f'--conf spark.app.name=query_sample_{view} --conf spark.sql.adaptive.enabled=true crusoe://data/scripts/query_sample.py {view}'
                             }
                         },
                         configurationOverrides={
@@ -243,12 +243,12 @@ class DataLoader:
                 # Count rows
                 try:
                     response = self.emr_client.start_job_run(
-                        applicationId=self.emr_application_id,
-                        executionRoleArn=self.execution_role_arn,
+                        applicationId=self.crusoe_application_id,
+                        executionRoleArn=self.crusoe_execution_role,
                         jobDriver={
                             'sparkSubmit': {
-                                'entryPoint': 's3://<bucket>/scripts/count_rows.py',
-                                'sparkSubmitParameters': f'--conf spark.app.name=count_rows_{view} --conf spark.sql.adaptive.enabled=true s3://<bucket>/scripts/count_rows.py {view}'
+                                'entryPoint': 'crusoe://data/scripts/count_rows.py',
+                                'sparkSubmitParameters': f'--conf spark.app.name=count_rows_{view} --conf spark.sql.adaptive.enabled=true crusoe://data/scripts/count_rows.py {view}'
                             }
                         },
                         configurationOverrides={

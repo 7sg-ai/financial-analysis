@@ -5,8 +5,8 @@ Uses Crusoe Cloud EMR Serverless and managed inference.
 """
 from typing import Dict, Any, Optional, List
 import logging
-import boto3
-from botocore.exceptions import ClientError
+from crusoe_cloud import Client
+from crusoe_cloud.exceptions import CrusoeError
 from openai import OpenAI
 
 from data_loader import DataLoader
@@ -25,11 +25,9 @@ class FinancialAnalysisEngine:
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self._emr_client = boto3.client(
-            "emr-serverless",
-            region_name=settings.aws_region or "us-east-1",
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key
+        self._crusoe_emr_client = Client(
+            endpoint=settings.crusoe_endpoint or "https://api.crusoecloud.com",
+            api_key=settings.crusoe_api_key
         )
         self._openai_client = OpenAI(
             base_url=settings.crusoe_inference_endpoint or "https://inference.api.crusoecloud.com/v1",
@@ -168,17 +166,16 @@ class FinancialAnalysisEngine:
             logger.info("Executing query...")
             logger.debug(f"Executing SQL query: {query}")
             try:
-                response = self._emr_client.start_job_run(
-                    applicationId=settings.emr_application_id,
-                    executionRoleArn=settings.emr_execution_role_arn,
-                    jobDriver={
-                        "sparkSubmit": {
-                            "entryPoint": "s3://.../query_runner.py",
-                            "sparkSubmitParameters": f"--conf spark.sql.adaptive.enabled=true --conf spark.sql.adaptive.coalescePartitions.enabled=true --conf spark.sql.adaptive.skewedJoin.enabled=true --conf spark.sql.adaptive.skewedJoin.minPartitionSize=10485760 --conf spark.sql.adaptive.skewedPartitionFactor=5 --conf spark.sql.adaptive.skewedPartitionThreshold=0.3 --conf spark.sql.adaptive.skewedPartitionMinSize=1048576 --conf spark.sql.adaptive.nonEmptyPartitionRatioForBroadcastJoin=0.8 --conf spark.sql.adaptive.nonEmptyPartitionRatioForBroadcastJoin=0.8 --conf spark.sql.adaptive.nonEmptyPartitionRatioForBroadcastJoin=0.8"
+                response = self._crusoe_emr_client.run_spark_job(
+                    application_id=settings.crusoe_application_id,
+                    job_driver={
+                        "spark_submit": {
+                            "entry_point": "s3://.../query_runner.py",
+                            "spark_submit_parameters": "--conf spark.sql.adaptive.enabled=true --conf spark.sql.adaptive.coalescePartitions.enabled=true --conf spark.sql.adaptive.skewedJoin.enabled=true --conf spark.sql.adaptive.skewedJoin.minPartitionSize=10485760 --conf spark.sql.adaptive.skewedPartitionFactor=5 --conf spark.sql.adaptive.skewedPartitionThreshold=0.3 --conf spark.sql.adaptive.skewedPartitionMinSize=1048576 --conf spark.sql.adaptive.nonEmptyPartitionRatioForBroadcastJoin=0.8 --conf spark.sql.adaptive.nonEmptyPartitionRatioForBroadcastJoin=0.8 --conf spark.sql.adaptive.nonEmptyPartitionRatioForBroadcastJoin=0.8"
                         }
                     },
-                    configurationOverrides={
-                        "applicationConfiguration": [
+                    configuration_overrides={
+                        "application_configuration": [
                             {"classification": "spark-defaults", "properties": {"spark.executor.instances": "1", "spark.executor.cores": "2", "spark.executor.memory": "4g", "spark.driver.cores": "1", "spark.driver.memory": "2g"}}
                         ]
                     },

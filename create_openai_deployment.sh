@@ -1,6 +1,6 @@
 #!/bin/bash
-# Script to create an Azure OpenAI deployment
-# This script creates a deployment for the specified model using Azure CLI
+# Script to create a CRUSOE OpenAI deployment
+# This script creates a deployment for the specified model using CRUSOE CLI
 
 set -e
 
@@ -17,7 +17,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo "=================================="
-echo "Create Azure OpenAI Deployment"
+echo "Create CRUSOE OpenAI Deployment"
 echo "=================================="
 echo ""
 echo "Configuration:"
@@ -27,39 +27,39 @@ echo "  Deployment Name: $DEPLOYMENT_NAME"
 echo "  Model Name: $MODEL_NAME"
 echo ""
 
-# Check if Azure CLI is installed
-if ! command -v az &> /dev/null; then
-    echo -e "${RED}✗ Azure CLI is not installed${NC}"
-    echo "Please install Azure CLI: https://docs.microsoft.com/cli/azure/install-azure-cli"
+# Check if CRUSOE CLI is installed
+if ! command -v crusoe &> /dev/null; then
+    echo -e "${RED}✗ CRUSOE CLI is not installed${NC}"
+    echo "Please install CRUSOE CLI: https://docs.cruseo.ai/cli"
     exit 1
 fi
 
 # Check if logged in
-if ! az account show &> /dev/null; then
-    echo -e "${YELLOW}⚠️  Not logged in to Azure. Logging in...${NC}"
-    az login
+if ! crusoe account show &> /dev/null; then
+    echo -e "${YELLOW}⚠️  Not logged in to CRUSOE. Logging in...${NC}"
+    crusoe login
 fi
 
 # Check if OpenAI resource exists
 echo "Checking if OpenAI resource exists..."
-if ! az cognitiveservices account show --name "$OPENAI_RESOURCE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+if ! crusoe resource show --name "$OPENAI_RESOURCE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
     echo -e "${RED}✗ OpenAI resource '$OPENAI_RESOURCE_NAME' not found in resource group '$RESOURCE_GROUP'${NC}"
     echo ""
-    echo "Available Cognitive Services resources:"
-    az cognitiveservices account list --resource-group "$RESOURCE_GROUP" --query "[].{Name:name,Kind:kind}" -o table 2>/dev/null || echo "None found"
+    echo "Available resources:"
+    crusoe resource list --resource-group "$RESOURCE_GROUP" --query "[].{Name:name,Kind:kind}" -o table 2>/dev/null || echo "None found"
     exit 1
 fi
 
 # Check if deployment already exists
 echo "Checking if deployment '$DEPLOYMENT_NAME' already exists..."
-if az cognitiveservices account deployment show \
+if crusoe deployment show \
     --name "$OPENAI_RESOURCE_NAME" \
     --resource-group "$RESOURCE_GROUP" \
     --deployment-name "$DEPLOYMENT_NAME" &> /dev/null; then
     echo -e "${GREEN}✓ Deployment '$DEPLOYMENT_NAME' already exists${NC}"
     echo ""
     echo "Deployment details:"
-    az cognitiveservices account deployment show \
+    crusoe deployment show \
         --name "$OPENAI_RESOURCE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --deployment-name "$DEPLOYMENT_NAME" \
@@ -72,7 +72,7 @@ echo ""
 echo "Creating deployment '$DEPLOYMENT_NAME' with model '$MODEL_NAME'..."
 echo "This may take several minutes..."
 
-az cognitiveservices account deployment create \
+crusoe deployment create \
     --name "$OPENAI_RESOURCE_NAME" \
     --resource-group "$RESOURCE_GROUP" \
     --deployment-name "$DEPLOYMENT_NAME" \
@@ -89,7 +89,7 @@ if [ $? -eq 0 ]; then
     echo "You can now use this deployment in your application."
     echo ""
     echo "To verify the deployment:"
-    echo "  az cognitiveservices account deployment show --name $OPENAI_RESOURCE_NAME --resource-group $RESOURCE_GROUP --deployment-name $DEPLOYMENT_NAME"
+    echo "  crusoe deployment show --name $OPENAI_RESOURCE_NAME --resource-group $RESOURCE_GROUP --deployment-name $DEPLOYMENT_NAME"
 else
     echo ""
     echo -e "${RED}✗ Failed to create deployment${NC}"
@@ -97,6 +97,6 @@ else
     echo "Common issues:"
     echo "  - Model '$MODEL_NAME' may not be available in your region"
     echo "  - You may need to request access to GPT-5.2-chat"
-    echo "  - Check quota limits in Azure Portal"
+    echo "  - Check quota limits in CRUSOE Portal"
     exit 1
 fi

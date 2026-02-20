@@ -11,7 +11,7 @@ import logging
 import asyncio
 from contextlib import asynccontextmanager
 
-from config import get_settings  # Ensure Crusoe-compatible config
+from config import get_settings  # Crusoe-compatible configuration
 from analysis_engine import FinancialAnalysisEngine
 
 # Configure logging - set to DEBUG for troubleshooting

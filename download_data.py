@@ -72,7 +72,7 @@ import logging
 import argparse
 import time
 from typing import Optional, Tuple
-import boto3
+import boto3  # Crusoe Storage is S3-compatible, uses boto3
 from urllib.parse import urlparse
 
 # Configure logging
@@ -98,7 +98,7 @@ def upload_to_crusoe_storage(local_path: Path, remote_path: str = None) -> bool:
     from urllib.parse import urlparse
     
     bucket = os.getenv("AWS_S3_BUCKET", os.getenv("AZURE_STORAGE_CONTAINER", os.getenv("SYNAPSE_FILE_SYSTEM", "data")))
-    endpoint = os.getenv("CRUSOE_STORAGE_ENDPOINT", "https://s3.crusoecloud.com")
+    endpoint = os.getenv("CRUSOE_STORAGE_ENDPOINT", "https://s3.crusoecloud.com")  # Crusoe-specific endpoint
     
     # Parse remote path or derive from local filename
     if remote_path is None:
@@ -114,7 +114,7 @@ def upload_to_crusoe_storage(local_path: Path, remote_path: str = None) -> bool:
         endpoint_url=endpoint,
         aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID", os.getenv("AZURE_STORAGE_ACCOUNT_NAME", os.getenv("SYNAPSE_STORAGE_ACCOUNT"))),
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY", os.getenv("AZURE_STORAGE_ACCOUNT_KEY")),
-        region_name="crusoe"
+        region_name="crusoe"  # Crusoe-specific region
     )
     
     try:

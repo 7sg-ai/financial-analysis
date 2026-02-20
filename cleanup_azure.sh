@@ -69,20 +69,20 @@ fi
 # Authentication
 echo ""
 echo "Checking Azure authentication..."
-az account show > /dev/null 2>&1 || az login
+crusoe auth status > /dev/null 2>&1 || crusoe auth login
 echo "✓ Authenticated"
 echo ""
 
 # Check if resource group exists
-if ! az group show --name "$RESOURCE_GROUP" &> /dev/null; then
+if ! crusoe group show --name "$RESOURCE_GROUP" &> /dev/null; then
     echo "Resource group '$RESOURCE_GROUP' does not exist. Nothing to clean up."
     exit 0
 fi
 
 # 1. Delete API Container Instance
 echo "1. Deleting API Container Instance ($API_CONTAINER_NAME)..."
-if az container show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az container delete \
+if crusoe instance show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    crusoe instance delete \
         --name "$API_CONTAINER_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --yes \
@@ -96,8 +96,8 @@ echo ""
 
 # 2. Delete User-Assigned Managed Identity (used by API container)
 echo "2. Deleting User-Assigned Managed Identity ($API_IDENTITY_NAME)..."
-if az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az identity delete \
+if crusoe identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    crusoe identity delete \
         --name "$API_IDENTITY_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --output none 2>/dev/null || true
@@ -109,8 +109,8 @@ echo ""
 
 # 3. Delete Streamlit Web App
 echo "3. Deleting Streamlit Web App ($STREAMLIT_APP_NAME)..."
-if az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az webapp delete \
+if crusoe app show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    crusoe app delete \
         --name "$STREAMLIT_APP_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --output none
@@ -122,8 +122,8 @@ echo ""
 
 # 4. Delete App Service Plan
 echo "4. Deleting App Service Plan ($APP_SERVICE_PLAN)..."
-if az appservice plan show --name "$APP_SERVICE_PLAN" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az appservice plan delete \
+if crusoe plan show --name "$APP_SERVICE_PLAN" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    crusoe plan delete \
         --name "$APP_SERVICE_PLAN" \
         --resource-group "$RESOURCE_GROUP" \
         --yes \
@@ -136,11 +136,11 @@ echo ""
 
 # 5. Delete Synapse Spark Pool (must be deleted before workspace)
 echo "5. Deleting Synapse Spark Pool ($SYNAPSE_SPARK_POOL_NAME)..."
-if az synapse spark pool show \
+if crusoe spark-pool show \
     --workspace-name "$SYNAPSE_WORKSPACE_NAME" \
     --resource-group "$RESOURCE_GROUP" \
     --name "$SYNAPSE_SPARK_POOL_NAME" &> /dev/null; then
-    az synapse spark pool delete \
+    crusoe spark-pool delete \
         --workspace-name "$SYNAPSE_WORKSPACE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --name "$SYNAPSE_SPARK_POOL_NAME" \
@@ -157,8 +157,8 @@ echo ""
 
 # 6. Delete Synapse Workspace (must be deleted before storage)
 echo "6. Deleting Synapse Workspace ($SYNAPSE_WORKSPACE_NAME)..."
-if az synapse workspace show --name "$SYNAPSE_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az synapse workspace delete \
+if crusoe workspace show --name "$SYNAPSE_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    crusoe workspace delete \
         --name "$SYNAPSE_WORKSPACE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --yes \
@@ -174,8 +174,8 @@ echo ""
 
 # 7. Delete Storage Account
 echo "7. Deleting Storage Account ($SYNAPSE_STORAGE_ACCOUNT)..."
-if az storage account show --name "$SYNAPSE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az storage account delete \
+if crusoe storage show --name "$SYNAPSE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    crusoe storage delete \
         --name "$SYNAPSE_STORAGE_ACCOUNT" \
         --resource-group "$RESOURCE_GROUP" \
         --yes \
@@ -188,8 +188,8 @@ echo ""
 
 # 8. Delete Azure OpenAI (Cognitive Services)
 echo "8. Deleting Azure OpenAI ($OPENAI_RESOURCE_NAME)..."
-if az cognitiveservices account show --name "$OPENAI_RESOURCE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az cognitiveservices account delete \
+if crusoe ai show --name "$OPENAI_RESOURCE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    crusoe ai delete \
         --name "$OPENAI_RESOURCE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --output none
@@ -201,8 +201,8 @@ fi
 # 8b. Purge deleted Cognitive Services account (frees name for reuse, stops charges)
 sleep 3  # Brief wait for delete to propagate to soft-deleted state
 echo "8b. Purging deleted Azure OpenAI ($OPENAI_RESOURCE_NAME)..."
-if az cognitiveservices account show-deleted --name "$OPENAI_RESOURCE_NAME" --location "$LOCATION" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az cognitiveservices account purge \
+if crusoe ai show-deleted --name "$OPENAI_RESOURCE_NAME" --location "$LOCATION" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    crusoe ai purge \
         --name "$OPENAI_RESOURCE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --location "$LOCATION" \
@@ -214,8 +214,8 @@ echo ""
 
 # 9. Delete Container Registry
 echo "9. Deleting Container Registry ($CONTAINER_REGISTRY)..."
-if az acr show --name "$CONTAINER_REGISTRY" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az acr delete \
+if crusoe registry show --name "$CONTAINER_REGISTRY" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    crusoe registry delete \
         --name "$CONTAINER_REGISTRY" \
         --resource-group "$RESOURCE_GROUP" \
         --yes \
@@ -228,9 +228,9 @@ echo ""
 
 # 10. Delete Resource Group (catches any remaining resources)
 echo "10. Deleting Resource Group ($RESOURCE_GROUP)..."
-if az group show --name "$RESOURCE_GROUP" &> /dev/null; then
+if crusoe group show --name "$RESOURCE_GROUP" &> /dev/null; then
     echo "   This may take several minutes if async deletions (Spark pool, Synapse) are still in progress..."
-    az group delete \
+    crusoe group delete \
         --name "$RESOURCE_GROUP" \
         --yes \
         --no-wait \
@@ -239,7 +239,7 @@ if az group show --name "$RESOURCE_GROUP" &> /dev/null; then
     echo ""
     echo "   Note: Resource group deletion runs asynchronously. If Synapse or Spark pool"
     echo "   are still deleting, the resource group delete will complete once they finish."
-    echo "   Check status with: az group show --name $RESOURCE_GROUP"
+    echo "   Check status with: crusoe group show --name $RESOURCE_GROUP"
 else
     echo "   ⏭️  Not found (already deleted)"
 fi

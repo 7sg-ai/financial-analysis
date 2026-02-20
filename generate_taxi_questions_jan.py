@@ -4,11 +4,14 @@ Generate taxi data questions for January 2024 data only, test them against the A
 """
 
 import json
-import requests
+import boto3
+from botocore.config import Config
 import time
 from datetime import datetime
 
-API_BASE_URL = "http://financial-analysis-api.d2f6dxb4c0dpgkc4.eastus2.azurecontainer.io:8000"
+# AWS API Gateway endpoint (replaces Azure Container Instance)
+# Replace with your deployed API Gateway invoke URL
+API_BASE_URL = "https://<your-api-id>.execute-api.<region>.amazonaws.com/prod"
 
 # Categories of questions - filtered for January 2024 only
 QUESTION_TEMPLATES = [
@@ -219,19 +222,29 @@ BACKUP_QUESTIONS = [
 def call_api(question: str) -> dict:
     """Call the analyze API with a question."""
     try:
-        response = requests.post(
-            f"{API_BASE_URL}/api/analyze",
-            json={"question": question},
-            timeout=120
+        # Use boto3 to invoke Lambda directly (or API Gateway via HTTP)
+        # Option 1: Direct Lambda invocation (recommended for internal use)
+        lambda_client = boto3.client('lambda', config=Config(connect_timeout=120, read_timeout=120))
+        response = lambda_client.invoke(
+            FunctionName='financial-analysis-api',
+            InvocationType='RequestResponse',
+            Payload=json.dumps({"question": question})
         )
-        if response.status_code == 200:
-            return {"success": True, "data": response.json()}
+        response_payload = json.loads(response['Payload'].read().decode('utf-8'))
+        
+        if response['StatusCode'] == 200:
+            return {"success": True, "data": response_payload}
         else:
-            return {"success": False, "error": f"HTTP {response.status_code}: {response.text[:200]}"}
-    except requests.exceptions.Timeout:
+            return {"success": False, "error": f"Lambda status {response['StatusCode']}: {str(response_payload)}"}
+            
+    except botocore.exceptions.EndpointConnectionError as e:
+        return {"success": False, "error": "Connection failed (check Lambda function and VPC settings)"}
+    except botocore.exceptions.ReadTimeoutError as e:
         return {"success": False, "error": "Request timed out"}
+    except botocore.exceptions.ClientError as e:
+        return {"success": False, "error": f"AWS client error: {str(e)}"}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": f"Unexpected error: {str(e)}"}
 
 
 def has_valid_results(response_data: dict) -> bool:
@@ -259,7 +272,10 @@ def has_valid_results(response_data: dict) -> bool:
         return True
     
     return False
-
+import boto3
+from botocore.config import Config
+import json
+import time
 
 def main():
     print("=" * 60)
@@ -400,11 +416,23 @@ def main():
     print(f"Saving {len(successful_results)} results to {output_file}")
     print("=" * 60)
     
-    with open(output_file, 'w') as f:
-        for entry in successful_results:
-            f.write(json.dumps(entry) + '\n')
+    # Upload to S3
+    s3 = boto3.client("s3", region_name="us-east-1")
+    try:
+        s3.put_object(
+            Bucket="your-bucket-name",  # Replace with your S3 bucket name
+            Key=output_file,
+            Body='\n'.join(json.dumps(entry) for entry in successful_results)
+        )
+        print(f"✓ Uploaded {len(successful_results)} questions to S3")
+    except Exception as e:
+        print(f"✗ Failed to upload to S3: {str(e)}")
+        # Fallback to local file if S3 upload fails
+        with open(output_file, 'w') as f:
+            for entry in successful_results:
+                f.write(json.dumps(entry) + '\n')
+        print(f"✓ Saved {len(successful_results)} questions locally")
     
-    print(f"✓ Saved {len(successful_results)} questions with answers")
     print()
     
     # Summary

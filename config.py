@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     llm_model_name: str = Field(default="Qwen/Qwen3-Coder-Next-FP8", env="LLM_MODEL_NAME")
 
     # Cloudflare Access (optional, for endpoints behind CF Zero Trust)
-    cf_access_client_id: Optional[str] = Field(default=None, env="CF_ACCESS_CLIENT_ID")
-    cf_access_client_secret: Optional[str] = Field(default=None, env="CF_ACCESS_CLIENT_SECRET")
+    cf_access_client_id: Optional[str] = Field(default="4eff9112d37e488616e3e38a50e5a4b2.access", env="CF_ACCESS_CLIENT_ID")
+    cf_access_client_secret: Optional[str] = Field(default="c69e39dbe5c38dcdb9f51d89cb33188943bae728042588ee8def81b5c1b0f8f2", env="CF_ACCESS_CLIENT_SECRET")
 
     # S3-compatible Storage (MinIO)
     s3_endpoint: Optional[str] = Field(default=None, env="S3_ENDPOINT")
@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     s3_bucket: Optional[str] = Field(default=None, env="S3_BUCKET")
     s3_region: str = Field(default="us-east-1", env="S3_REGION")
     s3_use_ssl: bool = Field(default=False, env="S3_USE_SSL")
+
+    # Langfuse Observability
+    langfuse_secret_key: Optional[str] = Field(default="sk-lf-f708968e-5023-41f6-a4b4-da6b9c6f01c8", env="LANGFUSE_SECRET_KEY")
+    langfuse_public_key: Optional[str] = Field(default="pk-lf-b3bc8526-3a13-44ad-be08-78de2f1f89ea", env="LANGFUSE_PUBLIC_KEY")
+    langfuse_host: Optional[str] = Field(default="https://langfuse.7sg.ai", env="LANGFUSE_HOST")
 
     # Application Configuration
     data_path: str = Field(default="./src_data", env="DATA_PATH")

@@ -7,12 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
+import os
 import logging
 import asyncio
 from contextlib import asynccontextmanager
 
 from config import get_settings
 from analysis_engine import FinancialAnalysisEngine
+from langfuse import Langfuse
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -21,6 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 engine: Optional[FinancialAnalysisEngine] = None
+langfuse_client: Optional[Langfuse] = None
 
 
 async def poll_for_data_files():
@@ -38,14 +41,26 @@ async def poll_for_data_files():
             await asyncio.sleep(poll_interval)
 
 
+def _init_langfuse(settings) -> Langfuse:
+    """Initialise Langfuse tracing using credentials from settings (config.py)."""
+    os.environ.setdefault("LANGFUSE_SECRET_KEY", settings.langfuse_secret_key)
+    os.environ.setdefault("LANGFUSE_PUBLIC_KEY", settings.langfuse_public_key)
+    os.environ.setdefault("LANGFUSE_HOST", settings.langfuse_host)
+    client = Langfuse()
+    logger.info("Langfuse tracing enabled (host=%s)", settings.langfuse_host)
+    return client
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan"""
-    global engine
+    global engine, langfuse_client
 
     logger.info("Starting Financial Analysis API...")
     settings = get_settings()
     logger.info("DATA_PATH=%s", settings.data_path)
+
+    langfuse_client = _init_langfuse(settings)
 
     while True:
         try:
@@ -67,6 +82,9 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Shutting down Financial Analysis API...")
+    if langfuse_client:
+        langfuse_client.flush()
+        logger.info("Langfuse traces flushed")
     if engine:
         engine.shutdown()
 

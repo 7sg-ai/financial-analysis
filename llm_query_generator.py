@@ -1,9 +1,11 @@
 """
 LLM-powered query generation module using an OpenAI-compatible endpoint.
 Converts natural language questions into SQL queries for DuckDB.
+All LLM calls are traced via Langfuse when configured.
 """
 from typing import Optional, Dict, List, Any
-from openai import OpenAI
+from langfuse.openai import OpenAI
+from langfuse import observe
 import json
 import logging
 import re
@@ -48,6 +50,7 @@ class QueryGenerator:
         self.schema_context = get_schema_context()
         logger.info("QueryGenerator initialized (model=%s, base_url=%s)", model_name, base_url)
 
+    @observe(name="generate_query")
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -128,6 +131,7 @@ class QueryGenerator:
 
         return {"is_valid": len(issues) == 0, "issues": issues, "warnings": warnings}
 
+    @observe(name="refine_query")
     def refine_query(
         self,
         original_question: str,
@@ -186,6 +190,7 @@ Return your response as JSON with the following structure:
             logger.error("Error refining query: %s", e)
             raise
 
+    @observe(name="suggest_related_queries")
     def suggest_related_queries(
         self,
         user_question: str,
@@ -317,6 +322,7 @@ class NarrativeGenerator:
         self.model_name = model_name
         logger.info("NarrativeGenerator initialized (model=%s)", model_name)
 
+    @observe(name="generate_narrative")
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),

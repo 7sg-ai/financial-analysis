@@ -6,6 +6,7 @@ Uses DuckDB for SQL execution (in-process, no remote sessions).
 from typing import Dict, Any, Optional, List
 import logging
 
+from langfuse import observe
 from duckdb_client import create_duckdb_session, DuckDBConnectionError
 from data_loader import DataLoader
 from llm_query_generator import QueryGenerator, NarrativeGenerator
@@ -86,6 +87,7 @@ class FinancialAnalysisEngine:
             logger.info("Data views refreshed")
         return success
 
+    @observe(name="analyze")
     def analyze(
         self,
         question: str,
@@ -212,6 +214,7 @@ class FinancialAnalysisEngine:
                 metadata={"error": str(e)},
             )
 
+    @observe(name="execute_custom_query")
     def execute_custom_query(
         self,
         query: str,

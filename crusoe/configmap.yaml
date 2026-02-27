@@ -11,6 +11,7 @@ data:
   S3_REGION: "us-east-1"
   S3_USE_SSL: "false"
   DATA_PATH: "s3://financial-data/nyc-taxi"
+  # LANGFUSE_HOST default in config.py; override here if needed
   LOG_LEVEL: "INFO"
   API_HOST: "0.0.0.0"
   API_PORT: "8000"

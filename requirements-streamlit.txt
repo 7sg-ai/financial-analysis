@@ -7,7 +7,7 @@ pandas==2.1.4
 openai>=2.20.0,<3.0.0
 
 # Web Framework
-streamlit==1.29.0
+streamlit>=1.31.0
 plotly==5.17.0
 
 # Utilities

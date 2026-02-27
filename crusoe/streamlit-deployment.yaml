@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: financial-analysis-streamlit
+  namespace: financial-analysis
+  labels:
+    app: financial-analysis-streamlit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: financial-analysis-streamlit
+  template:
+    metadata:
+      labels:
+        app: financial-analysis-streamlit
+    spec:
+      containers:
+        - name: streamlit
+          image: REPLACE_WITH_CCR_STREAMLIT_IMAGE_URL:latest
+          ports:
+            - containerPort: 8501
+          env:
+            - name: API_URL
+              value: "http://financial-analysis-api.financial-analysis.svc.cluster.local:8000"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: 8501
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: 8501
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      imagePullSecrets:
+        - name: ccr-credentials

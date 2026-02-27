@@ -1,28 +1,26 @@
 """
-Data loading module for Azure Synapse Spark
-Loads parquet/CSV data and registers temp views in Synapse (via Livy)
-All Spark execution happens in Azure Synapse; no local PySpark.
+Data loading module for DuckDB
+Loads parquet/CSV data and registers views in DuckDB (in-process).
 """
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 import logging
 
 if TYPE_CHECKING:
-    from synapse_client import SynapseSparkSession
+    from duckdb_client import DuckDBSession
 
 logger = logging.getLogger(__name__)
 
 
 class DataLoader:
     """
-    Manages loading of taxi trip data into Synapse Spark temp views.
-    Uses SynapseSparkSession (Livy) - no local Spark.
+    Manages loading of taxi trip data into DuckDB views.
     """
 
-    def __init__(self, session: "SynapseSparkSession"):
+    def __init__(self, session: "DuckDBSession"):
         self.session = session
 
     def clear_cache(self) -> None:
-        """No-op for Synapse (views are server-side); kept for API compatibility."""
+        """No-op kept for API compatibility."""
         logger.info("DataLoader cache cleared - next load will re-register views")
 
     def register_temp_views(
@@ -31,7 +29,7 @@ class DataLoader:
         year: Optional[str] = None,
     ) -> bool:
         """
-        Load datasets and register them as temp views in Synapse.
+        Load datasets and register them as views in DuckDB.
 
         Args:
             months: Months to load (e.g. ["01","02"]). None = all.
@@ -40,7 +38,7 @@ class DataLoader:
         Returns:
             True if at least one view was registered.
         """
-        logger.info("Registering temporary views in Synapse...")
+        logger.info("Registering views in DuckDB...")
         views_registered = []
 
         pattern = "yellow_tripdata_*-*.parquet" if not year else f"yellow_tripdata_{year}-*.parquet"
@@ -68,14 +66,14 @@ class DataLoader:
             logger.info("Registered view: taxi_zones")
 
         if views_registered:
-            logger.info(f"Registered {len(views_registered)} view(s): {', '.join(views_registered)}")
+            logger.info("Registered %d view(s): %s", len(views_registered), ", ".join(views_registered))
         else:
             logger.warning("No data files found. Views will be registered when data is available.")
 
         return len(views_registered) > 0
 
     def get_dataset_stats(self) -> Dict[str, Dict[str, Any]]:
-        """Get row counts and column info for loaded views via SQL."""
+        """Get row counts and column info for loaded views."""
         stats = {}
         views = ["yellow_taxi", "green_taxi", "fhv", "fhvhv", "taxi_zones"]
 
@@ -92,7 +90,7 @@ class DataLoader:
                     "column_names": cols,
                 }
             except Exception as e:
-                logger.error(f"Error loading stats for {view}: {e}")
+                logger.error("Error loading stats for %s: %s", view, e)
                 stats[view] = {"error": str(e)}
 
         return stats

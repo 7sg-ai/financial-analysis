@@ -1,11 +1,10 @@
-# Streamlit-specific requirements (no PySpark needed - calls API backend)
-# Core Dependencies (no PySpark)
+# Streamlit-specific requirements (calls API backend, no DuckDB needed)
+# Core Dependencies
 pyarrow==14.0.1
 pandas==2.1.4
 
-# Azure Dependencies
-azure-identity==1.15.0
-openai==1.12.0
+# LLM (OpenAI-compatible)
+openai>=2.20.0,<3.0.0
 
 # Web Framework
 streamlit==1.29.0

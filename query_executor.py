@@ -1,6 +1,5 @@
 """
-Query execution engine for Spark SQL via Azure Synapse (Livy)
-Executes queries remotely in Synapse; no local Spark.
+Query execution engine for SQL via DuckDB (in-process).
 """
 from typing import Dict, List, Any, Optional, TYPE_CHECKING
 import logging
@@ -11,24 +10,23 @@ import traceback
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from synapse_client import SynapseSparkSession
+    from duckdb_client import DuckDBSession
 
 
 class QueryExecutionError(Exception):
     """Custom exception for query execution errors"""
-    pass
 
 
 class QueryExecutor:
     """
-    Executes Spark SQL queries in Azure Synapse via Livy API.
+    Executes SQL queries in DuckDB.
     """
 
-    def __init__(self, session: "SynapseSparkSession", max_result_rows: int = 1000):
+    def __init__(self, session: "DuckDBSession", max_result_rows: int = 1000):
         self.session = session
         self.max_result_rows = max_result_rows
         self._query_history: List[Dict[str, Any]] = []
-        logger.info(f"QueryExecutor initialized (Synapse) max_result_rows={max_result_rows}")
+        logger.info("QueryExecutor initialized (DuckDB) max_result_rows=%d", max_result_rows)
 
     def execute_query(
         self,
@@ -37,21 +35,16 @@ class QueryExecutor:
         max_rows: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Execute SQL in Synapse and return results.
-
-        Args:
-            query: SQL query
-            return_dataframe: Ignored (no local DataFrame with Synapse)
-            max_rows: Row limit (default from constructor)
+        Execute SQL in DuckDB and return results.
 
         Returns:
             Dict with success, data, columns, row_count, execution_time_ms, error
         """
-        from synapse_client import SynapseExecutionError
+        from duckdb_client import DuckDBExecutionError
 
         start = datetime.now()
         limit = max_rows if max_rows is not None else self.max_result_rows
-        result = {
+        result: Dict[str, Any] = {
             "success": False,
             "data": [],
             "columns": [],
@@ -61,7 +54,7 @@ class QueryExecutor:
         }
 
         try:
-            logger.info(f"Executing query in Synapse: {query[:100]}...")
+            logger.info("Executing query in DuckDB: %s...", query[:100])
             r = self.session.execute_sql(query, max_rows=limit)
             result["data"] = r.get("data", [])
             result["columns"] = r.get("columns", [])
@@ -69,24 +62,24 @@ class QueryExecutor:
             result["execution_time_ms"] = int((datetime.now() - start).total_seconds() * 1000)
             result["success"] = True
             self._add_to_history(query, True, result["execution_time_ms"], result["row_count"])
-            logger.info(f"Query succeeded: {result['row_count']} rows, {result['execution_time_ms']}ms")
-        except SynapseExecutionError as e:
+            logger.info("Query succeeded: %d rows, %dms", result["row_count"], result["execution_time_ms"])
+        except DuckDBExecutionError as e:
             result["error"] = str(e)
             result["error_trace"] = traceback.format_exc()
             result["execution_time_ms"] = int((datetime.now() - start).total_seconds() * 1000)
             self._add_to_history(query, False, result["execution_time_ms"], 0, str(e))
-            logger.error(f"Query failed: {e}")
+            logger.error("Query failed: %s", e)
         except Exception as e:
             result["error"] = str(e)
             result["error_trace"] = traceback.format_exc()
             result["execution_time_ms"] = int((datetime.now() - start).total_seconds() * 1000)
             self._add_to_history(query, False, result["execution_time_ms"], 0, str(e))
-            logger.error(f"Query failed: {e}")
+            logger.error("Query failed: %s", e)
 
         return result
 
     def execute_and_analyze(self, query: str) -> Dict[str, Any]:
-        """Execute query; analysis simplified for Synapse (no DataFrame)."""
+        """Execute query with basic analysis metadata."""
         result = self.execute_query(query)
         if result["success"] and result.get("data"):
             result["analysis"] = {
@@ -101,9 +94,8 @@ class QueryExecutor:
         dry_run: bool = False,
     ) -> Dict[str, Any]:
         """Validate (basic checks) and optionally execute."""
-        result = {"valid": False, "validation_errors": [], "execution_result": None}
+        result: Dict[str, Any] = {"valid": False, "validation_errors": [], "execution_result": None}
         q = query.upper().strip()
-        # Use word boundaries so identifiers like "dropoff" or "tpep_dropoff_datetime" are allowed
         forbidden_ops = [
             (r"\bDROP\b", "DROP"),
             (r"\bDELETE\b", "DELETE"),
@@ -148,7 +140,7 @@ class QueryExecutor:
         return h[-limit:]
 
     def clear_cache(self) -> None:
-        """No-op for Synapse (compatibility)."""
+        """No-op (compatibility)."""
         pass
 
     def _add_to_history(
@@ -159,7 +151,7 @@ class QueryExecutor:
         row_count: int,
         error: Optional[str] = None,
     ) -> None:
-        entry = {
+        entry: Dict[str, Any] = {
             "timestamp": datetime.now().isoformat(),
             "query": query,
             "success": success,

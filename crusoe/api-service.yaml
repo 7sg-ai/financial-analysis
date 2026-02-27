@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: financial-analysis-api
+  namespace: financial-analysis
+  labels:
+    app: financial-analysis-api
+spec:
+  type: LoadBalancer
+  selector:
+    app: financial-analysis-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP

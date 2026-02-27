@@ -46,26 +46,29 @@ async def lifespan(app: FastAPI):
     """Manage application lifespan"""
     global engine
     
-    # Startup
+    # Startup - wait indefinitely for Synapse; do not exit/restart container
     logger.info("Starting Financial Analysis API...")
     settings = get_settings()
+    logger.info(f"DATA_PATH={settings.data_path}")
     
-    try:
-        engine = FinancialAnalysisEngine(settings)
-        # Try to initialize data, but don't fail if no files exist yet
+    while True:
         try:
-            engine.initialize_data()
-            logger.info("Financial Analysis Engine initialized successfully")
+            engine = FinancialAnalysisEngine(settings)
+            # Try to initialize data, but don't fail if no files exist yet
+            try:
+                engine.initialize_data()
+                logger.info("Financial Analysis Engine initialized successfully")
+            except Exception as e:
+                logger.warning(f"Data initialization skipped (no files found): {e}")
+                logger.info("Application will start and poll for data files periodically")
+            
+            # Start background task to poll for new data files
+            asyncio.create_task(poll_for_data_files())
+            logger.info("Started background task to poll for new data files (every 5 minutes)")
+            break
         except Exception as e:
-            logger.warning(f"Data initialization skipped (no files found): {e}")
-            logger.info("Application will start and poll for data files periodically")
-        
-        # Start background task to poll for new data files
-        poll_task = asyncio.create_task(poll_for_data_files())
-        logger.info("Started background task to poll for new data files (every 5 minutes)")
-    except Exception as e:
-        logger.error(f"Failed to initialize engine: {e}")
-        raise
+            logger.warning(f"Waiting for Synapse: {e}. Retrying in 30s...")
+            await asyncio.sleep(30)
     
     yield
     
@@ -186,54 +189,49 @@ async def get_data_status():
         from pathlib import Path
         
         # Get data path from settings
-        data_path = Path(engine.settings.data_path)
+        data_path_str = engine.settings.data_path
+        data_path = Path(data_path_str)
         
-        # List all parquet files in the data directory
+        # List all parquet files (local path only; abfss paths can't be listed via glob)
         parquet_files = []
-        if data_path.exists():
+        if data_path_str.startswith("abfss://"):
+            parquet_files = ["(Azure Storage - file listing not available)"]
+        elif data_path.exists():
             for pattern in ["yellow_tripdata_*.parquet", "green_tripdata_*.parquet", 
                           "fhv_tripdata_*.parquet", "fhvhv_tripdata_*.parquet"]:
                 files = glob.glob(str(data_path / pattern))
                 parquet_files.extend([Path(f).name for f in files])
+            parquet_files.sort()
         
-        parquet_files.sort()
-        
-        # Get registered Spark SQL views
+        # Get registered views via data loader stats (Synapse)
         registered_views = []
         view_details = {}
-        
+        expected_views = ["yellow_taxi", "green_taxi", "fhv", "fhvhv", "taxi_zones"]
         try:
-            # List all temp views
-            temp_views = engine.spark.catalog.listTables()
-            for view in temp_views:
-                if view.tableType == "TEMPORARY":
-                    view_name = view.name
+            stats = engine.data_loader.get_dataset_stats()
+            for view_name in expected_views:
+                s = stats.get(view_name, {})
+                if "error" not in s:
                     registered_views.append(view_name)
-                    
-                    # Get row count for each view
-                    try:
-                        row_count = engine.spark.sql(f"SELECT COUNT(*) as cnt FROM {view_name}").collect()[0]["cnt"]
-                        view_details[view_name] = {
-                            "row_count": row_count,
-                            "exists": True
-                        }
-                    except Exception as e:
-                        view_details[view_name] = {
-                            "row_count": None,
-                            "exists": True,
-                            "error": str(e)
-                        }
+                    view_details[view_name] = {
+                        "row_count": s.get("row_count"),
+                        "exists": True,
+                    }
+                else:
+                    view_details[view_name] = {
+                        "row_count": None,
+                        "exists": False,
+                        "error": s.get("error", ""),
+                    }
         except Exception as e:
-            logger.warning(f"Error listing views: {e}")
+            logger.warning(f"Error getting view stats: {e}")
         
-        # Expected views
-        expected_views = ["yellow_taxi", "green_taxi", "fhv", "fhvhv"]
         
         return {
             "data_loaded": engine._data_loaded,
-            "data_path": str(data_path),
+            "data_path": data_path_str,
             "files": {
-                "total_parquet_files": len(parquet_files),
+                "total_parquet_files": len(parquet_files) if parquet_files and not parquet_files[0].startswith("(") else 0,
                 "parquet_files": parquet_files,
                 "files_by_type": {
                     "yellow": [f for f in parquet_files if f.startswith("yellow")],
@@ -244,8 +242,8 @@ async def get_data_status():
             },
             "views": {
                 "registered": registered_views,
-                "expected": expected_views,
-                "missing": [v for v in expected_views if v not in registered_views],
+                "expected": ["yellow_taxi", "green_taxi", "fhv", "fhvhv"],
+                "missing": [v for v in ["yellow_taxi", "green_taxi", "fhv", "fhvhv"] if v not in registered_views],
                 "details": view_details
             }
         }
@@ -256,7 +254,7 @@ async def get_data_status():
 
 @app.post("/api/reload-data")
 async def reload_data(
-    year: str = Query(default="2024", description="Year to load data for"),
+    year: Optional[str] = Query(default=None, description="Year to load (omit to load all years)"),
     months: Optional[List[str]] = Query(default=None, description="Months to load (e.g., ['01', '02'])")
 ):
     """

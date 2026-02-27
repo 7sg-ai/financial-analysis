@@ -1,0 +1,554 @@
+apiVersion: wdf.7sg.ai/v2
+kind: WorkloadDefinition
+metadata:
+  name: financial-analysis
+  description: FastAPI + Streamlit app that uses an OpenAI-compatible LLM endpoint
+    to generate Spark SQL and executes it on a managed Spark service.
+  tags:
+    env: prod
+security:
+  network:
+    defaultExposure: private
+  identity:
+    workloadIdentity: true
+secrets:
+  provider: external-secrets
+  secretRefs:
+  - name: openai-endpoint
+    injectAs: env
+    envVar: AZURE_OPENAI_ENDPOINT
+    externalRef:
+      provider: vault
+      key: secret/financial-analysis/openai/endpoint
+  - name: openai-api-key
+    injectAs: env
+    envVar: AZURE_OPENAI_API_KEY
+    externalRef:
+      provider: vault
+      key: secret/financial-analysis/openai/api-key
+  - name: synapse-spark-pool-name
+    injectAs: env
+    envVar: SYNAPSE_SPARK_POOL_NAME
+    externalRef:
+      provider: vault
+      key: secret/financial-analysis/synapse/spark-pool-name
+  - name: synapse-workspace-name
+    injectAs: env
+    envVar: SYNAPSE_WORKSPACE_NAME
+    externalRef:
+      provider: vault
+      key: secret/financial-analysis/synapse/workspace-name
+  - name: azure-subscription-id
+    injectAs: env
+    envVar: AZURE_SUBSCRIPTION_ID
+    externalRef:
+      provider: vault
+      key: secret/financial-analysis/azure/subscription-id
+  - name: azure-resource-group
+    injectAs: env
+    envVar: AZURE_RESOURCE_GROUP
+    externalRef:
+      provider: vault
+      key: secret/financial-analysis/azure/resource-group
+  - name: storage-account-name
+    injectAs: env
+    envVar: AZURE_STORAGE_ACCOUNT_NAME
+    externalRef:
+      provider: vault
+      key: secret/financial-analysis/storage/account-name
+  - name: storage-account-key
+    injectAs: env
+    envVar: AZURE_STORAGE_ACCOUNT_KEY
+    externalRef:
+      provider: vault
+      key: secret/financial-analysis/storage/account-key
+  - name: storage-container
+    injectAs: env
+    envVar: AZURE_STORAGE_CONTAINER
+    externalRef:
+      provider: vault
+      key: secret/financial-analysis/storage/container
+  - name: crusoe-openai-endpoint
+    injectAs: env
+    envVar: AZURE_OPENAI_ENDPOINT
+    externalRef:
+      provider: vault
+      key: secret/financial-analysis/crusoe-openai/endpoint
+  - name: crusoe-openai-api-key
+    injectAs: env
+    envVar: AZURE_OPENAI_API_KEY
+    externalRef:
+      provider: vault
+      key: secret/financial-analysis/crusoe-openai/api-key
+dataSources:
+  inputs:
+  - name: downloaded-taxi-data
+    dsdfRef: dsdf/downloaded-taxi-data.dsdf.202602191817.yaml
+  - name: taxi-zone-lookup
+    dsdfRef: dsdf/taxi-zone-lookup.dsdf.202602191817.yaml
+  - name: azure-synapse-spark
+    dsdfRef: dsdf/azure-synapse-spark.dsdf.202602191817.yaml
+  - name: llm-endpoint
+    dsdfRef: dsdf/llm-endpoint.dsdf.202602191817.yaml
+  - name: llm-endpoint-crusoe
+    dsdfRef: dsdf/llm-endpoint-crusoe.dsdf.202602191817.yaml
+  - name: downloaded-taxi-data-streaming-to-crusoe
+    dsdfRef: dsdf/downloaded-taxi-data-streaming-to-crusoe.dsdf.202602191817.yaml
+  - name: taxi-data
+    dsdfRef: dsdf/taxi-data.dsdf.202602191817.yaml
+  outputs: []
+scenarios:
+  native:
+    description: 'Azure-native deployment: containers on AKS; data on ADLS Gen2; compute
+      on Synapse Spark; LLM on Azure OpenAI.'
+    topology:
+      components:
+      - &id001
+        name: financial-analysis-api
+        role: api
+        runtime:
+          platform: kubernetes
+          regions:
+          - eastus2
+          image:
+            repository: financial-analysis-api
+            tag: latest
+          env:
+          - name: API_HOST
+            value: 0.0.0.0
+          - name: API_PORT
+            value: '8000'
+          - name: LOG_LEVEL
+            value: INFO
+          - name: DATA_PATH
+            value: abfss://<container>@<storage-account>.dfs.core.windows.net/taxi-tripdata
+          - name: AZURE_OPENAI_DEPLOYMENT_NAME
+            value: gpt-5.2-chat
+          - name: AZURE_OPENAI_API_VERSION
+            value: 2024-12-01-preview
+          envFromSecretRefs:
+          - openai-endpoint
+          - openai-api-key
+          - synapse-spark-pool-name
+          - synapse-workspace-name
+          - azure-subscription-id
+          - azure-resource-group
+          - storage-account-name
+          - storage-account-key
+          - storage-container
+          resources:
+            cpu: '2'
+            memory: 4Gi
+          autoscaling:
+            minReplicas: 1
+            maxReplicas: 3
+            policy:
+              metric: cpu
+              target: 70
+        endpoints:
+        - name: http
+          port: 8000
+          exposure: internal
+          protocol: http
+          path: /
+      - &id002
+        name: financial-analysis-ui
+        role: ui
+        runtime:
+          platform: kubernetes
+          regions:
+          - eastus2
+          image:
+            repository: financial-analysis-streamlit
+            tag: latest
+          env:
+          - name: STREAMLIT_HOST
+            value: 0.0.0.0
+          - name: STREAMLIT_PORT
+            value: '8501'
+          - name: API_URL
+            value: http://financial-analysis-api:8000
+          envFromSecretRefs: []
+          resources:
+            cpu: '2'
+            memory: 4Gi
+          autoscaling:
+            minReplicas: 1
+            maxReplicas: 2
+            policy:
+              metric: cpu
+              target: 70
+        endpoints:
+        - name: http
+          port: 8501
+          exposure: public
+          protocol: http
+          path: /
+        dependsOn:
+        - financial-analysis-api
+    deployments:
+    - name: azure-east-app
+      target:
+        provider: azure
+        region: eastus2
+        tdfRef: azure-east
+        cluster: <aks-cluster>
+        namespace: financial-analysis
+      identityRef: azure-managed-identity://financial-analysis
+      secretStores:
+        primary: <keyvault-secret-store>
+      components:
+      - financial-analysis-api
+      - financial-analysis-ui
+      overrides:
+        components:
+          financial-analysis-api:
+            runtime:
+              image:
+                registry: financialanalysisacr.azurecr.io
+                repository: financial-analysis-api
+                tag: latest
+          financial-analysis-ui:
+            runtime:
+              image:
+                registry: financialanalysisacr.azurecr.io
+                repository: financial-analysis-streamlit
+                tag: latest
+  alternates:
+  - name: local-dev
+    description: Local development using docker/kind. Uses local filesystem for data
+      and localhost for API_URL.
+    topology:
+      components:
+      - *id001
+      - *id002
+    deployments:
+    - name: local-dev
+      target:
+        provider: onprem
+        region: local
+        tdfRef: local-dev
+        cluster: docker-desktop
+        namespace: financial-analysis
+      components:
+      - financial-analysis-api
+      - financial-analysis-ui
+      overrides:
+        components:
+          financial-analysis-api:
+            runtime:
+              env:
+              - name: DATA_PATH
+                value: ./src_data
+              image:
+                repository: financial-analysis-api
+                tag: dev
+            endpoints:
+            - name: http
+              port: 8000
+              exposure: public
+              protocol: http
+              path: /
+          financial-analysis-ui:
+            runtime:
+              env:
+              - name: API_URL
+                value: http://localhost:8000
+              image:
+                repository: financial-analysis-streamlit
+                tag: dev
+  - name: crusoe-kubernetes-crusoe-ai-vast
+    description: Containers run on Crusoe Kubernetes; LLM endpoint is Crusoe AI (OpenAI-compatible);
+      data read from VAST (S3-compatible) or a replicated mirror of ADLS.
+    topology:
+      components:
+      - *id001
+      - *id002
+    deployments:
+    - name: crusoe-us-app
+      target:
+        provider: crusoe
+        region: us-central
+        tdfRef: crusoe
+        cluster: <crusoe-cluster>
+        namespace: financial-analysis
+      identityRef: oidc://financial-analysis
+      secretStores:
+        primary: <crusoe-secret-store>
+      components:
+      - financial-analysis-api
+      - financial-analysis-ui
+      overrides:
+        components:
+          financial-analysis-api:
+            runtime:
+              env:
+              - name: DATA_PATH
+                value: s3://<vast-bucket>/taxi-tripdata
+              - name: AZURE_OPENAI_DEPLOYMENT_NAME
+                value: <crusoe-model-id>
+              envFromSecretRefs:
+              - synapse-spark-pool-name
+              - synapse-workspace-name
+              - azure-subscription-id
+              - azure-resource-group
+              - storage-account-name
+              - storage-account-key
+              - storage-container
+              - crusoe-openai-endpoint
+              - crusoe-openai-api-key
+  - name: azure-kubernetes-crusoe-ai-endpoints
+    description: 'Endpoints at Crusoe: application stays on Azure target; LLM model
+      endpoints switched to Crusoe (OpenAI-compatible).'
+    topology:
+      components:
+      - name: financial-analysis-api
+        role: api
+        runtime:
+          platform: kubernetes
+          regions:
+          - eastus2
+          image:
+            repository: financial-analysis-api
+            tag: latest
+          env:
+          - name: API_HOST
+            value: 0.0.0.0
+          - name: API_PORT
+            value: '8000'
+          - name: LOG_LEVEL
+            value: INFO
+          - name: DATA_PATH
+            value: abfss://<container>@<storage-account>.dfs.core.windows.net/taxi-tripdata
+          - name: AZURE_OPENAI_DEPLOYMENT_NAME
+            value: gpt-5.2-chat
+          - name: AZURE_OPENAI_API_VERSION
+            value: 2024-12-01-preview
+          envFromSecretRefs:
+          - openai-endpoint
+          - openai-api-key
+          - synapse-spark-pool-name
+          - synapse-workspace-name
+          - azure-subscription-id
+          - azure-resource-group
+          - storage-account-name
+          - storage-account-key
+          - storage-container
+          resources:
+            cpu: '2'
+            memory: 4Gi
+          autoscaling:
+            minReplicas: 1
+            maxReplicas: 3
+            policy:
+              metric: cpu
+              target: 70
+        endpoints:
+        - name: http
+          port: 8000
+          exposure: internal
+          protocol: http
+          path: /
+      - name: financial-analysis-ui
+        role: ui
+        runtime:
+          platform: kubernetes
+          regions:
+          - eastus2
+          image:
+            repository: financial-analysis-streamlit
+            tag: latest
+          env:
+          - name: STREAMLIT_HOST
+            value: 0.0.0.0
+          - name: STREAMLIT_PORT
+            value: '8501'
+          - name: API_URL
+            value: http://financial-analysis-api:8000
+          envFromSecretRefs: []
+          resources:
+            cpu: '2'
+            memory: 4Gi
+          autoscaling:
+            minReplicas: 1
+            maxReplicas: 2
+            policy:
+              metric: cpu
+              target: 70
+        endpoints:
+        - name: http
+          port: 8501
+          exposure: public
+          protocol: http
+          path: /
+        dependsOn:
+        - financial-analysis-api
+    deployments:
+    - name: azure-east-app-crusoe-ai
+      target:
+        provider: azure
+        region: eastus2
+        tdfRef: azure-east
+        cluster: <aks-cluster>
+        namespace: financial-analysis
+      identityRef: azure-managed-identity://financial-analysis
+      secretStores:
+        primary: <keyvault-secret-store>
+      components:
+      - financial-analysis-api
+      - financial-analysis-ui
+      overrides:
+        components:
+          financial-analysis-api:
+            runtime:
+              image:
+                registry: financialanalysisacr.azurecr.io
+                repository: financial-analysis-api
+                tag: latest
+              envFromSecretRefs:
+              - synapse-spark-pool-name
+              - synapse-workspace-name
+              - azure-subscription-id
+              - azure-resource-group
+              - storage-account-name
+              - storage-account-key
+              - storage-container
+              - crusoe-openai-endpoint
+              - crusoe-openai-api-key
+              env:
+              - name: AZURE_OPENAI_DEPLOYMENT_NAME
+                value: <crusoe-model-id>
+              - name: AZURE_OPENAI_API_VERSION
+                value: 2024-12-01-preview
+              - name: MODEL_ENDPOINT_DSDF
+                value: llm-endpoint-crusoe
+          financial-analysis-ui:
+            runtime:
+              image:
+                registry: financialanalysisacr.azurecr.io
+                repository: financial-analysis-streamlit
+                tag: latest
+  - name: crusoe-kubernetes-vast-spark-streaming
+    description: 'Spark on VAST: app runs on Crusoe Kubernetes; taxi tripdata and
+      curated Taxi Data are replicated from Azure to Crusoe VAST via streaming (Kafka
+      bridge).'
+    topology:
+      components:
+      - name: financial-analysis-api
+        role: api
+        runtime:
+          platform: kubernetes
+          regions:
+          - eastus2
+          image:
+            repository: financial-analysis-api
+            tag: latest
+          env:
+          - name: API_HOST
+            value: 0.0.0.0
+          - name: API_PORT
+            value: '8000'
+          - name: LOG_LEVEL
+            value: INFO
+          - name: DATA_PATH
+            value: abfss://<container>@<storage-account>.dfs.core.windows.net/taxi-tripdata
+          - name: AZURE_OPENAI_DEPLOYMENT_NAME
+            value: gpt-5.2-chat
+          - name: AZURE_OPENAI_API_VERSION
+            value: 2024-12-01-preview
+          envFromSecretRefs:
+          - openai-endpoint
+          - openai-api-key
+          - synapse-spark-pool-name
+          - synapse-workspace-name
+          - azure-subscription-id
+          - azure-resource-group
+          - storage-account-name
+          - storage-account-key
+          - storage-container
+          resources:
+            cpu: '2'
+            memory: 4Gi
+          autoscaling:
+            minReplicas: 1
+            maxReplicas: 3
+            policy:
+              metric: cpu
+              target: 70
+        endpoints:
+        - name: http
+          port: 8000
+          exposure: internal
+          protocol: http
+          path: /
+      - name: financial-analysis-ui
+        role: ui
+        runtime:
+          platform: kubernetes
+          regions:
+          - eastus2
+          image:
+            repository: financial-analysis-streamlit
+            tag: latest
+          env:
+          - name: STREAMLIT_HOST
+            value: 0.0.0.0
+          - name: STREAMLIT_PORT
+            value: '8501'
+          - name: API_URL
+            value: http://financial-analysis-api:8000
+          envFromSecretRefs: []
+          resources:
+            cpu: '2'
+            memory: 4Gi
+          autoscaling:
+            minReplicas: 1
+            maxReplicas: 2
+            policy:
+              metric: cpu
+              target: 70
+        endpoints:
+        - name: http
+          port: 8501
+          exposure: public
+          protocol: http
+          path: /
+        dependsOn:
+        - financial-analysis-api
+    deployments:
+    - name: crusoe-app-vast-streaming
+      target:
+        provider: crusoe
+        region: us-central
+        tdfRef: crusoe
+        cluster: <crusoe-cluster>
+        namespace: financial-analysis
+      identityRef: oidc://financial-analysis
+      secretStores:
+        primary: <crusoe-secret-store>
+      components:
+      - financial-analysis-api
+      - financial-analysis-ui
+      overrides:
+        components:
+          financial-analysis-api:
+            runtime:
+              image:
+                registry: financialanalysisacr.azurecr.io
+                repository: financial-analysis-api
+                tag: latest
+              env:
+              - name: DATA_PATH
+                value: s3://<vast-bucket>/taxi-tripdata
+              - name: LOG_LEVEL
+                value: INFO
+              - name: TAXI_TRIPDATA_DSDF
+                value: downloaded-taxi-data-streaming-to-crusoe
+              - name: TAXI_CURATED_DSDF
+                value: taxi-data
+          financial-analysis-ui:
+            runtime:
+              image:
+                registry: financialanalysisacr.azurecr.io
+                repository: financial-analysis-streamlit
+                tag: latest

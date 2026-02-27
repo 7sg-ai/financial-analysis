@@ -88,6 +88,8 @@ if 'api_available' not in st.session_state:
     st.session_state.api_available = False
 if 'query_history' not in st.session_state:
     st.session_state.query_history = []
+if 'question_input' not in st.session_state:
+    st.session_state.question_input = ""
 
 # Log the current API URL being used
 logger.info(f"Using API URL: {st.session_state.api_url} (from env: {env_api_url})")
@@ -199,7 +201,15 @@ def display_results(results: Dict[str, Any]):
     
     if not results.get('results'):
         logger.warning(f"display_results: results.get('results') is empty. Full results dict: {results}")
-        st.warning("No results to display")
+        validation_errors = results.get('metadata', {}).get('validation_errors', [])
+        is_security_rejection = any(
+            'dangerous keyword' in str(e).lower() or 'forbidden operation' in str(e).lower()
+            for e in validation_errors
+        )
+        if is_security_rejection:
+            st.error("Query was stopped due to security concerns with the SQL statement")
+        else:
+            st.warning("No results to display")
         logger.debug(f"Results structure: {json.dumps(results, indent=2, default=str)}")
         return
     
@@ -315,7 +325,8 @@ def main():
         
         for i, question in enumerate(example_questions):
             if st.button(f"💬 {question[:50]}...", key=f"example_{i}"):
-                st.session_state.selected_question = question
+                st.session_state.question_input = question
+                st.rerun()
         
         st.markdown("---")
         
@@ -324,7 +335,8 @@ def main():
             st.markdown("### 📚 Recent Queries")
             for i, (question, timestamp) in enumerate(st.session_state.query_history[-5:]):
                 if st.button(f"🔄 {question[:30]}...", key=f"history_{i}"):
-                    st.session_state.selected_question = question
+                    st.session_state.question_input = question
+                    st.rerun()
         
         st.markdown("---")
         
@@ -333,15 +345,21 @@ def main():
         include_narrative = st.checkbox("Include Narrative", value=True)
         max_rows = st.slider("Max Rows", 10, 1000, 100)
         
-        # Data info
+        # Data info (from API /api/data-status)
         if st.session_state.api_available:
             st.markdown("### 📊 Data Info")
             try:
-                info = st.session_state.analysis_engine.get_dataset_info()
-                for dataset, stats in info.items():
-                    if 'row_count' in stats:
-                        st.text(f"{dataset}: {stats['row_count']:,} rows")
-            except:
+                import httpx
+                r = httpx.get(f"{st.session_state.api_url}/api/data-status", timeout=10.0)
+                if r.status_code == 200:
+                    data = r.json()
+                    for view_name, detail in data.get("views", {}).get("details", {}).items():
+                        rc = detail.get("row_count")
+                        if rc is not None:
+                            st.text(f"{view_name}: {rc:,} rows")
+                else:
+                    st.text("Data info unavailable")
+            except Exception:
                 st.text("Data info unavailable")
 
     # Main content area
@@ -395,17 +413,11 @@ def main():
     st.markdown('<div class="query-box">', unsafe_allow_html=True)
     st.markdown("### 🔍 Ask a Question")
     
-    # Pre-fill with selected question
-    default_question = ""
-    if 'selected_question' in st.session_state:
-        default_question = st.session_state.selected_question
-        del st.session_state.selected_question
-    
     question = st.text_area(
         "Enter your question about the taxi data:",
-        value=default_question,
         height=100,
-        placeholder="e.g., What was the total revenue from yellow taxis in January 2024?"
+        placeholder="e.g., What was the total revenue from yellow taxis in January 2024?",
+        key="question_input",
     )
     
     col1, col2, col3 = st.columns([1, 1, 2])
@@ -420,6 +432,7 @@ def main():
     
     # Handle clear button
     if clear_button:
+        st.session_state.question_input = ""
         st.rerun()
     
     # Handle analyze button
@@ -465,7 +478,7 @@ def main():
                 st.text(f"Time: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
                 st.text(f"Question: {q}")
                 if st.button(f"Re-run Query {len(st.session_state.query_history) - i}", key=f"rerun_{i}"):
-                    st.session_state.selected_question = q
+                    st.session_state.question_input = q
                     st.rerun()
 
 if __name__ == "__main__":

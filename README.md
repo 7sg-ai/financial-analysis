@@ -6,7 +6,7 @@ Interactive financial analysis application using **Azure Synapse Spark** and **A
 
 This application provides an intelligent LLM-powered endpoint that:
 1. Accepts natural language questions about taxi/rideshare financial data
-2. Generates optimized Spark SQL queries using Azure OpenAI GPT-4
+2. Generates optimized Spark SQL queries using Azure OpenAI GPT-5.2-chat
 3. Executes queries on large-scale parquet datasets using Azure Synapse Spark
 4. Returns results as either tabular data or narrative explanations
 
@@ -14,7 +14,7 @@ This application provides an intelligent LLM-powered endpoint that:
 
 - 🤖 **Natural Language Queries**: Ask questions in plain English
 - ⚡ **Spark-Powered**: Handle large datasets efficiently with Azure Synapse Spark
-- 🧠 **LLM Query Generation**: Azure OpenAI GPT-4 generates optimized SQL
+- 🧠 **LLM Query Generation**: Azure OpenAI GPT-5.2-chat generates optimized SQL
 - 📊 **Multiple Output Formats**: JSON, tables, narratives, Markdown, HTML
 - 🔍 **Smart Validation**: Automatic query validation and safety checks
 - 📈 **Financial Metrics**: Revenue, tips, driver pay, trip analysis
@@ -32,7 +32,7 @@ This application provides an intelligent LLM-powered endpoint that:
          │
          ▼
 ┌─────────────────────────┐
-│  Azure OpenAI (GPT-4)   │  ← Generate Spark SQL Query
+│  Azure OpenAI (GPT-5.2-chat)   │  ← Generate Spark SQL Query
 └────────┬────────────────┘
          │
          ▼
@@ -104,10 +104,10 @@ cd financial-analysis
 **Set up Azure Container Registry:**
 ```bash
 # Create resource group
-az group create --name financial-analysis-rg --location eastus2
+az group create --name rg-financial-analysis --location eastus2
 
 # Create container registry
-az acr create --resource-group financial-analysis-rg \
+az acr create --resource-group rg-financial-analysis \
   --name financialanalysisacr --sku Basic --admin-enabled true
 ```
 
@@ -116,7 +116,7 @@ az acr create --resource-group financial-analysis-rg \
 # Create Azure OpenAI resource
 az cognitiveservices account create \
   --name financial-analysis-openai \
-  --resource-group financial-analysis-rg \
+  --resource-group rg-financial-analysis \
   --location eastus2 \
   --kind OpenAI \
   --sku S0
@@ -148,7 +148,7 @@ Set the following in your Azure App Service or Container Instance:
 ```bash
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_API_KEY=your-actual-api-key-here
-AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5.2-chat
 ```
 
 **Required Azure Synapse Spark configuration:**
@@ -177,6 +177,69 @@ python3 download_data.py --years 2024 --service-types yellow --months 1 2 3
 - `--service-types yellow green fhv fhvhv` - Choose service types
 - `--months 1 2 3` - Select specific months
 - `--verbose` - Enable detailed logging
+
+### Step 6: Cleanup and Cost Management
+
+When you're not using the application, you can reduce costs by stopping resources without deleting them. This allows you to quickly restart when needed.
+
+#### Stop Resources (Cost Reduction)
+
+Use the provided power-down script to stop running resources:
+
+```bash
+# Stop all resources in the resource group (interactive)
+./azure_power_down.sh -g rg-financial-analysis
+
+# Preview what would be stopped without actually stopping
+./azure_power_down.sh -g rg-financial-analysis --dry-run
+
+# Stop resources without confirmation prompts
+./azure_power_down.sh -g rg-financial-analysis --yes
+```
+
+**What gets stopped:**
+- Virtual Machines (deallocated)
+- Container Instances (stopped)
+- App Services / Web Apps (stopped)
+- AKS Clusters (stopped)
+- SQL Databases (paused if serverless)
+- Analysis Services (suspended)
+
+**What doesn't get stopped:**
+- Azure Container Registry (ACR) - minimal cost when idle
+- Azure Storage Accounts - pay for storage only
+- Azure Synapse Workspace - Spark pools auto-pause when idle
+- Azure OpenAI Service - pay per API call
+
+**To restart resources:**
+- Container Instances: They will restart automatically when accessed, or use `az container start`
+- Web Apps: Use `az webapp start` or access the URL (auto-starts)
+- VMs: Use `az vm start`
+- AKS: Use `az aks start`
+
+#### Complete Resource Deletion
+
+⚠️ **Warning**: This permanently deletes all resources and cannot be undone.
+
+```bash
+# Delete the entire resource group (deletes everything)
+az group delete --name rg-financial-analysis --yes --no-wait
+
+# Or delete individual resources:
+# Delete API container
+az container delete --name financial-analysis-api --resource-group rg-financial-analysis --yes
+
+# Delete Streamlit web app
+az webapp delete --name financial-analysis-streamlit --resource-group rg-financial-analysis
+
+# Delete App Service Plan
+az appservice plan delete --name financial-analysis-plan --resource-group rg-financial-analysis --yes
+
+# Delete Container Registry (if not needed)
+az acr delete --name financialanalysisacr --resource-group rg-financial-analysis --yes
+```
+
+**Note**: Storage accounts and Synapse workspaces may contain important data. Review these carefully before deletion.
 
 ## Accessing the Deployed Application
 
@@ -397,7 +460,7 @@ The application includes the `azure-synapse-spark` package. The `create_spark_se
    - Required for all data processing operations
 
 5. **Azure OpenAI Service**
-   - GPT-4 deployment for query generation
+   - GPT-5.2-chat deployment for query generation
    - Configure appropriate rate limits
 
 ### Data Storage Strategy
@@ -474,7 +537,7 @@ All configuration is managed through environment variables or `.env` file:
 |----------|----------|-------------|
 | `AZURE_OPENAI_ENDPOINT` | Yes | Azure OpenAI service endpoint |
 | `AZURE_OPENAI_API_KEY` | Yes | Azure OpenAI API key |
-| `AZURE_OPENAI_DEPLOYMENT_NAME` | No | Model deployment name (default: gpt-4) |
+| `AZURE_OPENAI_DEPLOYMENT_NAME` | No | Model deployment name (default: gpt-5.2-chat) |
 | `DATA_PATH` | No | Path to data directory (default: ./src_data or Azure Data Lake path) |
 | `API_PORT` | No | API server port (default: 8000) |
 | `SYNAPSE_SPARK_POOL_NAME` | Yes | Synapse Spark pool name |
@@ -536,7 +599,7 @@ Adjust in `llm_query_generator.py`:
 
 1. Verify endpoint URL format: `https://your-resource.openai.azure.com/`
 2. Ensure API key is valid and not expired
-3. Check you have access to the GPT-4 deployment
+3. Check you have access to the GPT-5.2-chat deployment
 4. Verify the deployment name matches your configuration
 
 ### Spark/Memory Issues

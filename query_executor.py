@@ -1,17 +1,19 @@
 """
-Query execution engine for Spark SQL via Azure Synapse (Livy)
-Executes queries remotely in Synapse; no local Spark.
+Query execution engine for Spark SQL via Livy-compatible endpoint (e.g., EMR Serverless or self-hosted Spark Thrift Server)
+Executes queries remotely via HTTP; no local Spark.
 """
 from typing import Dict, List, Any, Optional, TYPE_CHECKING
 import logging
 import re
 from datetime import datetime
 import traceback
+import os
+import requests
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from synapse_client import SynapseSparkSession
+    from synapse_client import SynapseExecutionError
 
 
 class QueryExecutionError(Exception):
@@ -21,14 +23,14 @@ class QueryExecutionError(Exception):
 
 class QueryExecutor:
     """
-    Executes Spark SQL queries in Azure Synapse via Livy API.
+    Executes Spark SQL queries via Livy-compatible endpoint.
     """
 
     def __init__(self, session: "SynapseSparkSession", max_result_rows: int = 1000):
         self.session = session
         self.max_result_rows = max_result_rows
         self._query_history: List[Dict[str, Any]] = []
-        logger.info(f"QueryExecutor initialized (Synapse) max_result_rows={max_result_rows}")
+        logger.info(f"QueryExecutor initialized (Livy) max_result_rows={max_result_rows}")
 
     def execute_query(
         self,
@@ -37,11 +39,11 @@ class QueryExecutor:
         max_rows: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Execute SQL in Synapse and return results.
+        Execute SQL via Livy-compatible endpoint and return results.
 
         Args:
             query: SQL query
-            return_dataframe: Ignored (no local DataFrame with Synapse)
+            return_dataframe: Ignored (no local DataFrame with Livy)
             max_rows: Row limit (default from constructor)
 
         Returns:
@@ -61,8 +63,8 @@ class QueryExecutor:
         }
 
         try:
-            logger.info(f"Executing query in Synapse: {query[:100]}...")
-            r = self.session.execute_sql(query, max_rows=limit)
+            logger.info(f"Executing query via Livy: {query[:100]}...")
+            r = self._execute_sql_livy(query, max_rows=limit)
             result["data"] = r.get("data", [])
             result["columns"] = r.get("columns", [])
             result["row_count"] = r.get("row_count", len(result["data"]))
@@ -85,8 +87,102 @@ class QueryExecutor:
 
         return result
 
+    def _execute_sql_livy(self, query: str, max_rows: int = 1000) -> Dict[str, Any]:
+        """Execute SQL via Livy-compatible endpoint using requests.post()."""
+        livy_endpoint = os.environ.get("LIVY_ENDPOINT")
+        if not livy_endpoint:
+            raise RuntimeError("LIVY_ENDPOINT environment variable not set")
+
+        # Submit statement to Livy session
+        url = f"{livy_endpoint}/sessions/{self.session.session_id}/statements"
+        payload = {
+            "code": query,
+            "kind": "sql"
+        }
+        
+        # Prepare auth headers if credentials are available
+        headers = {"Content-Type": "application/json"}
+        livy_username = os.environ.get("LIVY_USERNAME")
+        livy_password = os.environ.get("LIVY_PASSWORD")
+        if livy_username and livy_password:
+            headers["Authorization"] = f"Basic {requests.auth._basic_auth_str(livy_username, livy_password)}"
+
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            response.raise_for_status()
+            statement_data = response.json()
+            
+            # Poll for completion
+            statement_id = statement_data.get("id")
+            if statement_id is None:
+                raise RuntimeError("No statement ID returned from Livy")
+            
+            # Poll for statement completion
+            import time
+            poll_interval = 1  # seconds
+            max_wait = 300  # seconds
+            elapsed = 0
+            while elapsed < max_wait:
+                time.sleep(poll_interval)
+                poll_url = f"{livy_endpoint}/sessions/{self.session.session_id}/statements/{statement_id}"
+                poll_response = requests.get(poll_url, headers=headers, timeout=10)
+                poll_response.raise_for_status()
+                poll_data = poll_response.json()
+                state = poll_data.get("state")
+                
+                if state == "finished":
+                    output = poll_data.get("output", {})
+                    if output.get("status") == "ok":
+                        data = output.get("data", {})
+                        # Extract result data (Spark SQL typically returns row-oriented data)
+                        result_data = data.get("application/vnd.apache.spark.dataframe+json", {})
+                        if isinstance(result_data, dict) and "schema" in result_data and "data" in result_data:
+                            # Handle structured response
+                            columns = [field["name"] for field in result_data["schema"]["fields"]]
+                            rows = result_data["data"]
+                            # Convert rows to list of dicts
+                            result_rows = []
+                            for row in rows:
+                                if isinstance(row, list) and len(row) == len(columns):
+                                    result_rows.append(dict(zip(columns, row)))
+                                else:
+                                    # Fallback: treat as single column
+                                    result_rows.append({columns[0]: row})
+                            return {
+                                "data": result_rows[:max_rows],
+                                "columns": columns,
+                                "row_count": len(result_rows)
+                            }
+                        elif isinstance(result_data, list):
+                            # Direct list of rows
+                            return {
+                                "data": result_data[:max_rows],
+                                "columns": [],
+                                "row_count": len(result_data)
+                            }
+                        else:
+                            # Generic fallback
+                            return {
+                                "data": [str(result_data)][:max_rows],
+                                "columns": ["result"],
+                                "row_count": 1
+                            }
+                    elif output.get("status") == "error":
+                        raise SynapseExecutionError(f"Livy statement error: {output.get('evalue', 'Unknown error')}")
+                    else:
+                        raise SynapseExecutionError(f"Unexpected output status: {output.get('status')}")
+                elif state in ["error", "cancelled", "dead"]:
+                    raise SynapseExecutionError(f"Livy statement failed with state: {state}")
+                
+                elapsed += poll_interval
+            
+            raise SynapseExecutionError(f"Statement execution timed out after {max_wait} seconds")
+            
+        except requests.exceptions.RequestException as e:
+            raise SynapseExecutionError(f"HTTP request failed: {str(e)}")
+
     def execute_and_analyze(self, query: str) -> Dict[str, Any]:
-        """Execute query; analysis simplified for Synapse (no DataFrame)."""
+        """Execute query; analysis simplified for Livy (no DataFrame)."""
         result = self.execute_query(query)
         if result["success"] and result.get("data"):
             result["analysis"] = {
@@ -128,7 +224,7 @@ class QueryExecutor:
     def get_query_plan(self, query: str) -> str:
         """Get execution plan via EXPLAIN."""
         try:
-            r = self.session.execute_sql(f"EXPLAIN {query}", max_rows=100)
+            r = self._execute_sql_livy(f"EXPLAIN {query}", max_rows=100)
             lines = []
             for row in r.get("data", []):
                 lines.append(str(row))
@@ -148,7 +244,7 @@ class QueryExecutor:
         return h[-limit:]
 
     def clear_cache(self) -> None:
-        """No-op for Synapse (compatibility)."""
+        """No-op for Livy (compatibility)."""
         pass
 
     def _add_to_history(

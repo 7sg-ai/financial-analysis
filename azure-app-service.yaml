@@ -10,7 +10,7 @@ data:
     
     # Set environment variables
     export PYTHONPATH=/app
-    # Azure Synapse Spark configuration is set via environment variables
+    # Crusoe Synapse Spark configuration is set via environment variables
     
     # Start Streamlit
     streamlit run streamlit_app.py \
@@ -43,34 +43,34 @@ spec:
         ports:
         - containerPort: 8501
         env:
-        - name: AZURE_OPENAI_ENDPOINT
+        - name: CRUSOE_INFERENCE_URL
           valueFrom:
             secretKeyRef:
               name: azure-secrets
               key: openai-endpoint
-        - name: AZURE_OPENAI_API_KEY
+        - name: CRUSOE_API_KEY
           valueFrom:
             secretKeyRef:
               name: azure-secrets
               key: openai-key
-        - name: AZURE_OPENAI_DEPLOYMENT_NAME
+        - name: CRUSOE_OPENAI_DEPLOYMENT_NAME
           value: "gpt-5.2-chat"
-        - name: SYNAPSE_SPARK_POOL_NAME
+        - name: CRUSOE_SPARK_POOL
           valueFrom:
             secretKeyRef:
               name: azure-secrets
               key: synapse-spark-pool-name
-        - name: SYNAPSE_WORKSPACE_NAME
+        - name: CRUSOE_WORKSPACE
           valueFrom:
             secretKeyRef:
               name: azure-secrets
               key: synapse-workspace-name
-        - name: AZURE_SUBSCRIPTION_ID
+        - name: CRUSOE_SUBSCRIPTION_ID
           valueFrom:
             secretKeyRef:
               name: azure-secrets
               key: subscription-id
-        - name: AZURE_RESOURCE_GROUP
+        - name: CRUSOE_RESOURCE_GROUP
           valueFrom:
             secretKeyRef:
               name: azure-secrets

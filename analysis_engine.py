@@ -1,7 +1,7 @@
 """
 Main analysis engine that orchestrates all components
 Integrates query generation, execution, and response formatting
-Uses Azure Synapse Spark exclusively (no local PySpark).
+Uses Crusoe Managed Inference and Livy-compatible Spark execution.
 """
 from typing import Dict, Any, Optional, List
 import logging
@@ -19,29 +19,33 @@ logger = logging.getLogger(__name__)
 class FinancialAnalysisEngine:
     """
     Main engine for financial analysis queries.
-    All Spark execution runs in Azure Synapse.
+    All Spark execution runs via Livy-compatible HTTP endpoints.
     """
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self._session = create_synapse_session(settings)
-        self.data_loader = DataLoader(self._session)
+        self.data_loader = DataLoader(
+            livy_endpoint=settings.crusoe_livy_endpoint,
+            livy_username=settings.crusoe_livy_username,
+            livy_password=settings.crusoe_livy_password
+        )
         self.query_generator = QueryGenerator(
-            endpoint=settings.azure_openai_endpoint,
-            api_key=settings.azure_openai_api_key,
-            deployment_name=settings.azure_openai_deployment_name,
-            api_version=settings.azure_openai_api_version,
+            endpoint=settings.crusoe_inference_url,
+            api_key=settings.crusoe_api_key,
+            model_id=settings.crusoe_deployment_name,
+            api_version=settings.crusoe_api_version,
         )
         self.narrative_generator = NarrativeGenerator(
-            endpoint=settings.azure_openai_endpoint,
-            api_key=settings.azure_openai_api_key,
-            deployment_name=settings.azure_openai_deployment_name,
-            api_version=settings.azure_openai_api_version,
+            endpoint=settings.crusoe_inference_url,
+            api_key=settings.crusoe_api_key,
+            deployment_name=settings.crusoe_deployment_name,
+            api_version=settings.crusoe_api_version,
         )
         self.query_executor = QueryExecutor(self._session, max_result_rows=1000)
         self.response_formatter = ResponseFormatter()
         self._data_loaded = False
-        logger.info("FinancialAnalysisEngine initialized (Azure Synapse)")
+        logger.info("FinancialAnalysisEngine initialized (Crusoe + Livy)")
     
     def initialize_data(
         self,
@@ -369,4 +373,3 @@ class FinancialAnalysisEngine:
             logger.info("Synapse session closed")
         except Exception as e:
             logger.error(f"Error closing Synapse session: {e}")
-

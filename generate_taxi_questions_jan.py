@@ -7,8 +7,9 @@ import json
 import requests
 import time
 from datetime import datetime
+import os
 
-API_BASE_URL = "http://financial-analysis-api.d2f6dxb4c0dpgkc4.eastus2.azurecontainer.io:8000"
+CCR_API_URL = os.getenv("CRUSOE_CCR_ENDPOINT", "http://localhost:8000")
 
 # Categories of questions - filtered for January 2024 only
 QUESTION_TEMPLATES = [
@@ -220,7 +221,7 @@ def call_api(question: str) -> dict:
     """Call the analyze API with a question."""
     try:
         response = requests.post(
-            f"{API_BASE_URL}/api/analyze",
+            f"{CCR_API_URL}/api/analyze",
             json={"question": question},
             timeout=120
         )

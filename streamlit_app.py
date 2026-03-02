@@ -72,9 +72,9 @@ st.markdown("""
 # Initialize session state
 import os
 
-# Always read API_URL from environment variable (can change between restarts)
+# Always read CRUSOE_API_URL from environment variable (can change between restarts)
 # This ensures the app uses the latest environment variable value
-env_api_url = os.getenv("API_URL", "http://localhost:8000")
+env_api_url = os.getenv("CRUSOE_API_URL", "http://localhost:8000")
 if 'api_url' not in st.session_state or st.session_state.api_url != env_api_url:
     # Update session state if environment variable changed or not set
     st.session_state.api_url = env_api_url
@@ -107,8 +107,8 @@ def check_api_health():
 
 def initialize_api():
     """Initialize connection to the API backend"""
-    # Re-read API_URL from environment in case it changed
-    env_api_url = os.getenv("API_URL", "http://localhost:8000")
+    # Re-read CRUSOE_API_URL from environment in case it changed
+    env_api_url = os.getenv("CRUSOE_API_URL", "http://localhost:8000")
     if st.session_state.api_url != env_api_url:
         logger.info(f"API URL changed, updating from {st.session_state.api_url} to {env_api_url}")
         st.session_state.api_url = env_api_url
@@ -296,14 +296,14 @@ def main():
             st.success("✅ API Connected")
             st.info(f"Backend: {st.session_state.api_url}")
             # Show environment variable value for debugging
-            env_api_url = os.getenv("API_URL", "Not set")
+            env_api_url = os.getenv("CRUSOE_API_URL", "Not set")
             if env_api_url != st.session_state.api_url:
-                st.warning(f"⚠️ Env API_URL ({env_api_url}) differs from session ({st.session_state.api_url})")
+                st.warning(f"⚠️ Env CRUSOE_API_URL ({env_api_url}) differs from session ({st.session_state.api_url})")
         else:
             st.warning("⚠️ API Not Connected")
             st.info(f"API URL: {st.session_state.api_url}")
-            env_api_url = os.getenv("API_URL", "Not set")
-            st.info(f"Environment API_URL: {env_api_url}")
+            env_api_url = os.getenv("CRUSOE_API_URL", "Not set")
+            st.info(f"Environment CRUSOE_API_URL: {env_api_url}")
             st.info("Click 'Connect to API' to connect to the backend")
         
         st.markdown("---")

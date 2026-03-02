@@ -1,9 +1,9 @@
 #!/bin/bash
-# Deployment script for Streamlit app to Azure App Service
+# Deployment script for Streamlit app to CRUSOE
 set -e
 
 echo "=================================="
-echo "Financial Analysis Streamlit - Azure Deployment"
+echo "Financial Analysis Streamlit - CRUSOE Deployment"
 echo "=================================="
 
 # Configuration
@@ -25,19 +25,19 @@ echo "  Container Registry: $CONTAINER_REGISTRY"
 echo "  Image: $IMAGE_NAME:$IMAGE_TAG"
 echo ""
 
-# Check Azure CLI
-if ! command -v az &> /dev/null; then
-    echo "Error: Azure CLI not found. Please install it first."
+# Check CRUSOE CLI
+if ! command -v crusoe &> /dev/null; then
+    echo "Error: CRUSOE CLI not found. Please install it first."
     exit 1
 fi
 
 # Login check
-echo "Checking Azure login..."
-az account show > /dev/null 2>&1 || az login
+echo "Checking CRUSOE login..."
+crusoe account show > /dev/null 2>&1 || crusoe login
 
 # Create resource group if it doesn't exist
 echo "Ensuring resource group exists..."
-az group create \
+crusoe resource-group create \
     --name "$RESOURCE_GROUP" \
     --location "$LOCATION" \
     --output none
@@ -46,9 +46,9 @@ echo "✓ Resource group ready"
 
 # Create container registry if it doesn't exist
 echo "Checking container registry..."
-if ! az acr show --name "$CONTAINER_REGISTRY" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+if ! crusoe container-registry show --name "$CONTAINER_REGISTRY" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
     echo "Creating container registry..."
-    az acr create \
+    crusoe container-registry create \
         --name "$CONTAINER_REGISTRY" \
         --resource-group "$RESOURCE_GROUP" \
         --sku Basic \
@@ -65,7 +65,7 @@ echo "Building Streamlit Docker image..."
 docker build -f Dockerfile.streamlit -t "$IMAGE_NAME:$IMAGE_TAG" .
 
 echo "Logging into container registry..."
-az acr login --name "$CONTAINER_REGISTRY"
+crusoe container-registry login --name "$CONTAINER_REGISTRY"
 
 echo "Tagging image..."
 FULL_IMAGE_NAME="$CONTAINER_REGISTRY.azurecr.io/$IMAGE_NAME:$IMAGE_TAG"
@@ -79,14 +79,14 @@ echo "✓ Image pushed successfully"
 # Get registry credentials
 echo ""
 echo "Retrieving registry credentials..."
-ACR_USERNAME=$(az acr credential show --name "$CONTAINER_REGISTRY" --query username -o tsv)
-ACR_PASSWORD=$(az acr credential show --name "$CONTAINER_REGISTRY" --query "passwords[0].value" -o tsv)
+ACR_USERNAME=$(crusoe container-registry credential show --name "$CONTAINER_REGISTRY" --query username -o tsv)
+ACR_PASSWORD=$(crusoe container-registry credential show --name "$CONTAINER_REGISTRY" --query "passwords[0].value" -o tsv)
 
 # Create App Service Plan
 echo ""
 echo "Creating App Service Plan..."
-if ! az appservice plan show --name "$APP_SERVICE_PLAN" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az appservice plan create \
+if ! crusoe app-service-plan show --name "$APP_SERVICE_PLAN" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    crusoe app-service-plan create \
         --name "$APP_SERVICE_PLAN" \
         --resource-group "$RESOURCE_GROUP" \
         --location "$LOCATION" \
@@ -111,9 +111,9 @@ fi
 echo ""
 echo "Creating/updating web app..."
 
-if az webapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+if crusoe webapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
     echo "Updating existing web app..."
-    az webapp config container set \
+    crusoe webapp config container set \
         --name "$APP_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --docker-custom-image-name "$FULL_IMAGE_NAME" \
@@ -123,7 +123,7 @@ if az webapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/
         --output none
 else
     echo "Creating new web app..."
-    az webapp create \
+    crusoe webapp create \
         --name "$APP_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --plan "$APP_SERVICE_PLAN" \
@@ -136,7 +136,7 @@ fi
 
 # Configure app settings
 echo "Configuring app settings..."
-az webapp config appsettings set \
+crusoe webapp config appsettings set \
     --name "$APP_NAME" \
     --resource-group "$RESOURCE_GROUP" \
     --settings \
@@ -154,14 +154,14 @@ az webapp config appsettings set \
 
 # Configure startup command
 echo "Setting startup command..."
-az webapp config set \
+crusoe webapp config set \
     --name "$APP_NAME" \
     --resource-group "$RESOURCE_GROUP" \
     --startup-file "streamlit run streamlit_app.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true --browser.gatherUsageStats=false" \
     --output none
 
 # Get the web app URL
-WEBAPP_URL=$(az webapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --query defaultHostName -o tsv)
+WEBAPP_URL=$(crusoe webapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --query defaultHostName -o tsv)
 
 echo ""
 echo "=================================="
@@ -177,9 +177,9 @@ echo "  - Query history"
 echo "  - Example questions"
 echo ""
 echo "🔧 Management Commands:"
-echo "  View logs: az webapp log tail --name $APP_NAME --resource-group $RESOURCE_GROUP"
-echo "  Restart: az webapp restart --name $APP_NAME --resource-group $RESOURCE_GROUP"
-echo "  Delete: az webapp delete --name $APP_NAME --resource-group $RESOURCE_GROUP"
+echo "  View logs: crusoe webapp log tail --name $APP_NAME --resource-group $RESOURCE_GROUP"
+echo "  Restart: crusoe webapp restart --name $APP_NAME --resource-group $RESOURCE_GROUP"
+echo "  Delete: crusoe webapp delete --name $APP_NAME --resource-group $RESOURCE_GROUP"
 echo ""
 
 # Test the deployment

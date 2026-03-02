@@ -36,9 +36,9 @@ Usage Examples:
 
 Upload to Azure Storage (for Synapse Spark):
     Set these environment variables before using --upload:
-    - AZURE_STORAGE_ACCOUNT_NAME (or SYNAPSE_STORAGE_ACCOUNT)
-    - AZURE_STORAGE_ACCOUNT_KEY
-    - AZURE_STORAGE_CONTAINER (or SYNAPSE_FILE_SYSTEM, default: data)
+    - CRUSOE_STORAGE_ACCOUNT (or CRUSOE_STORAGE_ACCOUNT)
+    - CRUSOE_STORAGE_ACCESS_KEY
+    - CRUSOE_STORAGE_BUCKET (or CRUSOE_STORAGE_BUCKET, default: data)
     
     After upload, set DATA_PATH to: abfss://<container>@<account>.dfs.core.windows.net/<storage-path>/
 
@@ -69,6 +69,7 @@ import logging
 import argparse
 import time
 from typing import Optional, Tuple
+import botocore.exceptions
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -183,9 +184,9 @@ def get_storage_config() -> Optional[Tuple[str, str, str]]:
     Get Azure Storage configuration from environment variables.
     Returns (account_name, account_key, container) or None if not configured.
     """
-    account_name = os.environ.get("AZURE_STORAGE_ACCOUNT_NAME") or os.environ.get("SYNAPSE_STORAGE_ACCOUNT")
-    account_key = os.environ.get("AZURE_STORAGE_ACCOUNT_KEY")
-    container = os.environ.get("AZURE_STORAGE_CONTAINER") or os.environ.get("SYNAPSE_FILE_SYSTEM", "data")
+    account_name = os.environ.get("CRUSOE_STORAGE_ACCOUNT") or os.environ.get("CRUSOE_STORAGE_ACCOUNT")
+    account_key = os.environ.get("CRUSOE_STORAGE_ACCESS_KEY")
+    container = os.environ.get("CRUSOE_STORAGE_BUCKET") or os.environ.get("CRUSOE_STORAGE_BUCKET", "data")
     
     if account_name and account_key:
         return (account_name, account_key, container)
@@ -202,27 +203,35 @@ def upload_file_to_storage(
 ) -> bool:
     """Upload a single file to Azure Blob Storage (Data Lake Gen2 compatible)."""
     try:
-        from azure.storage.blob import BlobServiceClient
+        import boto3
         
-        blob_service = BlobServiceClient(
-            account_url=f"https://{account_name}.blob.core.windows.net",
-            credential=account_key
+        s3 = boto3.client(
+            's3',
+            endpoint_url=os.environ.get('S3_ENDPOINT', 'https://storage.api.crusoecloud.com'),
+            aws_access_key_id=account_key,
+            aws_secret_access_key=account_key
         )
-        container_client = blob_service.get_container_client(container_name)
-        blob_client = container_client.get_blob_client(blob_path)
         
-        if skip_existing and blob_client.exists():
-            logger.info(f"⏭️  Skipping upload (exists in storage): {blob_path}")
-            return True
+        if skip_existing:
+            try:
+                s3.head_object(Bucket=container_name, Key=blob_path)
+                logger.info(f"⏭️  Skipping upload (exists in storage): {blob_path}")
+                return True
+            except botocore.exceptions.ClientError as e:
+                if e.response['Error']['Code'] == '404':
+                    pass  # File doesn't exist, continue with upload
+                else:
+                    logger.error(f"❌ Failed to check existence of {blob_path}: {e}")
+                    return False
         
         with open(local_path, "rb") as data:
-            blob_client.upload_blob(data, overwrite=True)
+            s3.upload_fileobj(data, container_name, blob_path)
         
         file_size_mb = local_path.stat().st_size / (1024 * 1024)
         logger.info(f"☁️  Uploaded {local_path.name} -> {blob_path} ({file_size_mb:.1f} MB)")
         return True
     except ImportError:
-        logger.error("azure-storage-blob package required for upload. Install with: pip install azure-storage-blob")
+        logger.error("boto3 package required for upload. Install with: pip install boto3")
         return False
     except Exception as e:
         logger.error(f"❌ Failed to upload {local_path.name}: {e}")
@@ -363,7 +372,7 @@ def main():
             exit(1)
         storage_config = get_storage_config()
         if not storage_config:
-            logger.error("Storage config required. Set AZURE_STORAGE_ACCOUNT_NAME, AZURE_STORAGE_ACCOUNT_KEY")
+            logger.error("Storage config required. Set CRUSOE_STORAGE_ACCOUNT, CRUSOE_STORAGE_ACCESS_KEY")
             exit(1)
         account_name, account_key, container_name = storage_config
         logger.info(f"  Source: {data_dir.absolute()}")
@@ -427,7 +436,7 @@ def main():
                 data_path = f"abfss://{container_name}@{account_name}.dfs.core.windows.net/{args.storage_path.strip('/')}/"
                 logger.info(f"  DATA_PATH for API: {data_path}")
         else:
-            logger.warning("⚠️  Upload skipped: Set AZURE_STORAGE_ACCOUNT_NAME, AZURE_STORAGE_ACCOUNT_KEY (and optionally AZURE_STORAGE_CONTAINER)")
+            logger.warning("⚠️  Upload skipped: Set CRUSOE_STORAGE_ACCOUNT, CRUSOE_STORAGE_ACCESS_KEY (and optionally CRUSOE_STORAGE_BUCKET)")
     
     # Summary
     logger.info("\n" + "=" * 60)

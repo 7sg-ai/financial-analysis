@@ -10,14 +10,9 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from azure.identity import ManagedIdentityCredential
-from azure.synapse.spark import SparkClient
-from azure.synapse.spark.models import (
-    LivyStatementStates,
-    LivyStates,
-    SparkSessionOptions,
-    SparkStatementOptions,
-)
+import requests
+from azure.identity import ClientSecretCredential
+
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +22,11 @@ STATEMENT_MAX_WAIT_SEC = 300
 # Session startup can take 5-10+ min for Large pools (cold start).
 # None = wait indefinitely (container will not restart; keeps waiting for Synapse).
 SESSION_STARTUP_TIMEOUT_SEC = None
+
+# Livy endpoint from environment
+LIVY_ENDPOINT = os.environ.get('LIVY_ENDPOINT', 'http://localhost:8998')
+# TODO: Crusoe has no managed Synapse equivalent. Use self-hosted Spark Thrift Server or EMR Serverless.
+# Note: Synapse Spark (Livy) is replaced by hybrid_synapse_livy strategy using requests to Livy-compatible endpoint.
 
 
 class SynapseConnectionError(Exception):
@@ -54,17 +54,26 @@ class SynapseSparkSession:
         storage_account: Optional[str] = None,
         storage_key: Optional[str] = None,
     ):
-        self._client = SparkClient(
-            credential=credential,
-            endpoint=endpoint,
-            spark_pool_name=spark_pool_name,
-        )
-        self.endpoint = endpoint
-        self.spark_pool_name = spark_pool_name
-        self.data_path = data_path.rstrip("/")
         self._session_id: Optional[int] = None
         self._storage_account = storage_account
         self._storage_key = storage_key
+        self._livy_endpoint = LIVY_ENDPOINT
+        self._session_data: Optional[Dict[str, Any]] = None
+        self._credential = credential
+        # Use CRUSOE environment variables for storage config
+        self._storage_bucket = os.environ.get('CRUSOE_STORAGE_BUCKET')
+        self._file_system = os.environ.get('CRUSOE_FILE_SYSTEM')
+        self._data_path = os.environ.get('CRUSOE_DATA_PATH', './src_data')
+        # Use CRUSOE environment variables for credentials
+        self._storage_access_key = os.environ.get('CRUSOE_STORAGE_ACCESS_KEY')
+        self._client_id = os.environ.get('CRUSOE_CLIENT_ID')
+        self._tenant_id = os.environ.get('CRUSOE_TENANT_ID')
+        self._client_secret = os.environ.get('CRUSOE_CLIENT_SECRET')
+        self._resource = os.environ.get('CRUSOE_RESOURCE', 'https://storage.azure.com/.default')
+        # Ensure required Azure AD token env vars are present (hybrid access)
+        self._tenant_id = os.environ.get('CRUSOE_TENANT_ID')
+        self._client_secret = os.environ.get('CRUSOE_CLIENT_SECRET')
+        self._resource = os.environ.get('CRUSOE_RESOURCE', 'https://storage.azure.com/.default')
 
     def connect(self) -> None:
         """Create a Livy PySpark session in Synapse."""
@@ -72,11 +81,32 @@ class SynapseSparkSession:
             logger.info("Synapse session already active")
             return
 
+        # Acquire Azure AD token using ClientSecretCredential
+        if self._client_id and self._tenant_id and self._client_secret:
+            credential = ClientSecretCredential(
+                tenant_id=self._tenant_id,
+                client_id=self._client_id,
+                client_secret=self._client_secret
+            )
+            token = credential.get_token(self._resource)
+            auth_header = {"Authorization": f"Bearer {token.token}"}
+        else:
+            auth_header = {}
+
         conf: Dict[str, str] = {}
-        if self._storage_account and self._storage_key:
-            key = f"fs.azure.account.key.{self._storage_account}.dfs.core.windows.net"
-            conf[key] = self._storage_key
-            logger.info(f"Configured Spark for Azure Storage: {self._storage_account}")
+        # Use CRUSOE S3-compatible storage config
+        storage_bucket = self._storage_bucket
+        storage_account = os.environ.get('CRUSOE_STORAGE_ACCOUNT')
+        storage_key = self._storage_access_key
+        if storage_account and storage_key and storage_bucket:
+            # Configure S3-compatible storage for Spark via Hadoop config
+            conf["spark.hadoop.fs.s3a.access.key"] = storage_account
+            conf["spark.hadoop.fs.s3a.secret.key"] = storage_key
+            conf["spark.hadoop.fs.s3a.endpoint"] = f"{storage_bucket}.s3.amazonaws.com"
+            conf["spark.hadoop.fs.s3a.impl"] = "org.apache.hadoop.fs.s3a.S3AFileSystem"
+            logger.info(f"Configured Spark for S3-compatible storage: {storage_bucket}")
+        else:
+            logger.warning("CRUSOE_STORAGE_ACCOUNT, CRUSOE_STORAGE_ACCESS_KEY, and CRUSOE_STORAGE_BUCKET must be set for S3-compatible storage")
 
         # Dynamic executor allocation: scale executors based on query complexity.
         # Requires pool to have --enable-dynamic-exec (see deploy_azure.sh).
@@ -90,60 +120,51 @@ class SynapseSparkSession:
 
         # Base config for 3 Small nodes (12 vCores, 96 GB total)
         # executor_count=2 is initial; dynamic allocation adjusts at runtime
-        opts = SparkSessionOptions(
-            name="FinancialAnalysis",
-            configuration=conf,
-            executor_count=2,
-            executor_memory="12g",
-            executor_cores=2,
-            driver_memory="4g",
-            driver_cores=2,
-        )
+        payload = {
+            "name": "FinancialAnalysis",
+            "conf": conf,
+            "executorCount": 2,
+            "executorMemory": "12g",
+            "executorCores": 2,
+            "driverMemory": "4g",
+            "driverCores": 2,
+            "kind": "pyspark"
+        }
 
         logger.info("Creating Synapse Spark session...")
-        session = self._client.spark_session.create_spark_session(
-            opts, detailed=True
+        resp = requests.post(
+            f"{self._livy_endpoint}/sessions",
+            json=payload,
+            headers={"Content-Type": "application/json", **auth_header}
         )
-        self._session_id = session.id
+        resp.raise_for_status()
+        session_data = resp.json()
+        self._session_id = session_data.get("id")
+        self._session_data = session_data
         logger.info(f"Synapse session created: id={self._session_id}")
 
         # Wait for session to be idle
         self._wait_for_session_idle()
 
-    def _extract_session_error_detail(self, session: Any) -> str:
+    def _extract_session_error_detail(self, session_data: Dict[str, Any]) -> str:
         """Extract error details from failed session for troubleshooting."""
         details: List[str] = []
         try:
-            app_id = getattr(session, "app_id", None)
-            app_info = getattr(session, "app_info", None)
-            if app_info and not app_id:
-                app_id = getattr(app_info, "id", None)
+            app_id = session_data.get("appId")
             if app_id:
                 details.append(
                     f"appId={app_id} (Synapse Studio: Monitor → Apache Spark applications)"
                 )
+            app_info = session_data.get("appInfo", {})
             if app_info:
-                driver = getattr(app_info, "driver_log_url", None) or getattr(
-                    app_info, "driverLogUrl", None
-                )
+                driver = app_info.get("driverLogUrl") or app_info.get("log")
                 if driver:
                     details.append(f"driverLogUrl={driver}")
-            livy = getattr(session, "livy_info", None)
-            if livy:
-                ex = getattr(livy, "exception", None) or getattr(
-                    livy, "exception_message", None
-                )
-                if ex:
-                    details.append(f"exception={ex}")
-            # Fallback: log serialized session if we have as_dict (Azure SDK models)
-            if not details and hasattr(session, "as_dict"):
-                d = session.as_dict()
-                err_bits = [
-                    str(v) for k, v in (d or {}).items()
-                    if v and ("error" in str(k).lower() or "exception" in str(k).lower())
-                ]
-                if err_bits:
-                    details.append("; ".join(err_bits[:3]))  # limit length
+            state = session_data.get("state")
+            if state and state.lower() in ("error", "dead", "killed"):
+                err_msg = session_data.get("log", [])
+                if err_msg:
+                    details.append(f"exception={'; '.join(err_msg[-3:])}")
         except Exception:
             pass
         return ". " + "; ".join(details) if details else ""
@@ -153,19 +174,30 @@ class SynapseSparkSession:
         start = time.time()
         last_log = 0.0
         while True:
-            session = self._client.spark_session.get_spark_session(
-                self._session_id, detailed=True
+            # Use CRUSOE credentials for auth (if available)
+            auth_header = {}
+            if self._client_id and self._tenant_id and self._client_secret:
+                credential = ClientSecretCredential(
+                    tenant_id=self._tenant_id,
+                    client_id=self._client_id,
+                    client_secret=self._client_secret
+                )
+                token = credential.get_token(self._resource)
+                auth_header = {"Authorization": f"Bearer {token.token}"}
+            auth_header["Content-Type"] = "application/json"
+
+            resp = requests.get(
+                f"{self._livy_endpoint}/sessions/{self._session_id}",
+                headers=auth_header
             )
-            state = getattr(session, "state", None)
-            if state is None and hasattr(session, "livy_info"):
-                li = session.livy_info
-                state = getattr(li, "current_state", None) if li else None
-            state = str(state).lower() if state else "unknown"
+            resp.raise_for_status()
+            session_data = resp.json()
+            state = session_data.get("state", "").lower()
             if state in ("idle", "busy"):
                 logger.info(f"Session ready, state={state}")
                 return
             if state in ("dead", "error", "killed", "success"):
-                err_detail = self._extract_session_error_detail(session)
+                err_detail = self._extract_session_error_detail(session_data)
                 raise SynapseConnectionError(
                     f"Session failed: state={state}{err_detail}"
                 )
@@ -188,42 +220,52 @@ class SynapseSparkSession:
         if self._session_id is None:
             raise SynapseConnectionError("Not connected to Synapse")
 
-        opts = SparkStatementOptions(code=code, kind=kind)
-        stmt = self._client.spark_session.create_spark_statement(
-            self._session_id, opts
+        # Use CRUSOE credentials for auth (if available)
+        auth_header = {}
+        if self._client_id and self._tenant_id and self._client_secret:
+            credential = ClientSecretCredential(
+                tenant_id=self._tenant_id,
+                client_id=self._client_id,
+                client_secret=self._client_secret
+            )
+            token = credential.get_token(self._resource)
+            auth_header = {"Authorization": f"Bearer {token.token}"}
+        auth_header["Content-Type"] = "application/json"
+
+        payload = {
+            "code": code,
+            "kind": kind
+        }
+        resp = requests.post(
+            f"{self._livy_endpoint}/sessions/{self._session_id}/statements",
+            json=payload,
+            headers=auth_header
         )
-        stmt_id = stmt.id
+        resp.raise_for_status()
+        stmt_data = resp.json()
+        stmt_id = stmt_data.get("id")
 
         # Poll for completion
         start = time.time()
         while time.time() - start < STATEMENT_MAX_WAIT_SEC:
-            stmt = self._client.spark_session.get_spark_statement(
-                self._session_id, stmt_id
+            resp = requests.get(
+                f"{self._livy_endpoint}/sessions/{self._session_id}/statements/{stmt_id}",
+                headers=auth_header
             )
-            state = getattr(stmt, "livy_info", None)
-            if state:
-                state = getattr(state, "current_state", None) or str(state)
-            else:
-                state = getattr(stmt, "state", "unknown")
+            resp.raise_for_status()
+            stmt_status = resp.json()
+            state = stmt_status.get("state", "unknown").lower()
 
-            if state in (
-                LivyStatementStates.AVAILABLE,
-                "available",
-            ):
-                output = getattr(stmt, "output", None)
+            if state in ("available", "success"):
+                output = stmt_status.get("output", {})
                 if output:
                     return output
                 return {}
-            if state in (
-                LivyStatementStates.ERROR,
-                LivyStatementStates.CANCELLED,
-                "error",
-                "cancelled",
-            ):
-                output = getattr(stmt, "output", None)
+            if state in ("error", "cancelled", "dead"):
+                output = stmt_status.get("output", {})
                 err_msg = "Unknown error"
                 if output:
-                    data = getattr(output, "data", None) or {}
+                    data = output.get("data", {})
                     if isinstance(data, dict):
                         err_msg = str(data.get("text/plain", data))
                     else:
@@ -253,11 +295,16 @@ print(json.dumps(result))
 '''
         output = self._execute_statement(code, kind="pyspark")
 
-        data = getattr(output, "data", None) or {}
-        if isinstance(data, dict):
-            text = data.get("text/plain") or data.get("application/json")
+        # Extract text from Livy output
+        if isinstance(output, dict):
+            data = output.get("data", {})
+            if isinstance(data, dict):
+                text = data.get("text/plain") or data.get("application/json")
+            else:
+                text = str(data)
         else:
-            text = str(data)
+            text = str(output)
+
         if not text:
             return {"data": [], "columns": [], "row_count": 0}
 
@@ -383,13 +430,27 @@ print("OK")
         """Terminate the Livy session."""
         if self._session_id is not None:
             try:
-                self._client.spark_session.cancel_spark_session(self._session_id)
+                # Use CRUSOE credentials for auth (if available)
+                auth_header = {}
+                if self._client_id and self._tenant_id and self._client_secret:
+                    credential = ClientSecretCredential(
+                        tenant_id=self._tenant_id,
+                        client_id=self._client_id,
+                        client_secret=self._client_secret
+                    )
+                    token = credential.get_token(self._resource)
+                    auth_header = {"Authorization": f"Bearer {token.token}"}
+                auth_header["Content-Type"] = "application/json"
+
+                resp = requests.delete(
+                    f"{self._livy_endpoint}/sessions/{self._session_id}",
+                    headers=auth_header
+                )
+                resp.raise_for_status()
                 logger.info("Synapse session closed")
             except Exception as e:
                 logger.warning(f"Error closing session: {e}")
             self._session_id = None
-        if hasattr(self._client, "close"):
-            self._client.close()
 
 
 def create_synapse_session(settings: Any) -> SynapseSparkSession:
@@ -403,28 +464,27 @@ def create_synapse_session(settings: Any) -> SynapseSparkSession:
 
     if not workspace or not pool:
         raise SynapseConnectionError(
-            "SYNAPSE_WORKSPACE_NAME and SYNAPSE_SPARK_POOL_NAME are required"
+            "CRUSOE_WORKSPACE and CRUSOE_SPARK_POOL are required"
         )
-    if not str(data_path).startswith("abfss://"):
-        raise SynapseConnectionError(
-            "DATA_PATH must be an abfss:// path when using Azure Synapse. "
-            f"Got: {data_path}"
-        )
-
-    endpoint = f"https://{workspace}.dev.azuresynapse.net"
-    # Use managed identity only (no service principal). AZURE_CLIENT_ID selects user-assigned identity when set.
-    client_id = os.environ.get("AZURE_CLIENT_ID")
-    credential = ManagedIdentityCredential(client_id=client_id)
-    storage_account = getattr(settings, "azure_storage_account_name", None)
-    storage_key = getattr(settings, "azure_storage_account_key", None)
+    # CRUSOE uses S3-compatible storage; no abfss:// requirement
+    # Use CRUSOE environment variables for storage config
+    storage_account = os.environ.get('CRUSOE_STORAGE_ACCOUNT')
+    storage_key = os.environ.get('CRUSOE_STORAGE_ACCESS_KEY')
+    storage_bucket = os.environ.get('CRUSOE_STORAGE_BUCKET')
 
     session = SynapseSparkSession(
-        credential=credential,
-        endpoint=endpoint,
+        credential=None,
+        endpoint="",
         spark_pool_name=pool,
         data_path=data_path,
         storage_account=storage_account,
         storage_key=storage_key,
     )
+    # Set additional CRUSOE-specific attributes on session
+    session._storage_access_key = storage_key
+    session._client_id = os.environ.get('CRUSOE_CLIENT_ID')
+    session._tenant_id = os.environ.get('CRUSOE_TENANT_ID')
+    session._client_secret = os.environ.get('CRUSOE_CLIENT_SECRET')
+    session._resource = os.environ.get('CRUSOE_RESOURCE', 'https://storage.azure.com/.default')
     session.connect()
     return session

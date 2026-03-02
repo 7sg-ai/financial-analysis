@@ -1,66 +1,58 @@
 """
-LLM-powered query generation module using Azure OpenAI
+LLM-powered query generation module using Crusoe Managed Inference
 Converts natural language questions into Spark SQL queries
 """
 from typing import Optional, Dict, List, Any, Literal
-from openai import AzureOpenAI
+from openai import OpenAI
 import json
 import logging
 import re
 from tenacity import retry, stop_after_attempt, wait_exponential
 from schemas import get_schema_context
+from os import environ
 
 logger = logging.getLogger(__name__)
 
 
 class QueryGenerator:
     """
-    Generates Spark SQL queries from natural language using Azure OpenAI
+    Generates Spark SQL queries from natural language using Crusoe Managed Inference
     """
     
     def __init__(
         self,
-        endpoint: str,
-        api_key: str,
-        deployment_name: str = "gpt-5.2-chat",
-        api_version: str = "2024-12-01-preview"
+        CRUSOE_INFERENCE_URL: str = environ.get("CRUSOE_INFERENCE_URL", "https://inference.api.crusoecloud.com/v1"),
+        CRUSOE_API_KEY: str = environ.get("CRUSOE_API_KEY"),
+        model_id: str = environ.get("CRUSOE_DEPLOYMENT_NAME", "gpt-4o"),
+        api_version: str = environ.get("CRUSOE_API_VERSION", "2024-12-01-preview")
     ):
         """
         Initialize QueryGenerator
         
         Args:
-            endpoint: Azure OpenAI endpoint URL
-            api_key: Azure OpenAI API key
-            deployment_name: Deployment name for the model
+            CRUSOE_INFERENCE_URL: Crusoe Managed Inference endpoint URL
+            CRUSOE_API_KEY: Crusoe API key
+            model_id: Model ID for the model (e.g., 'gpt-4o' or CRUSOE model ID)
             api_version: API version to use
         """
-        # Normalize endpoint: remove trailing slash and ensure correct format
-        # Azure OpenAI SDK expects: https://your-resource.openai.azure.com (no trailing slash)
-        normalized_endpoint = endpoint.rstrip('/')
+        # Normalize CRUSOE_INFERENCE_URL: remove trailing slash and ensure correct format
+        normalized_endpoint = CRUSOE_INFERENCE_URL.rstrip('/')
         
-        # Validate endpoint format
+        # Validate CRUSOE_INFERENCE_URL format
         if not normalized_endpoint.startswith('https://'):
-            raise ValueError(f"Invalid endpoint format: {endpoint}. Must start with https://")
+            raise ValueError(f"Invalid CRUSOE_INFERENCE_URL format: {CRUSOE_INFERENCE_URL}. Must start with https://")
         
-        # Warn if using generic cognitive services endpoint instead of OpenAI-specific endpoint
-        if 'api.cognitive.microsoft.com' in normalized_endpoint:
-            logger.warning(
-                f"Endpoint appears to be generic Cognitive Services endpoint: {normalized_endpoint}. "
-                f"Azure OpenAI requires a resource-specific endpoint like: https://your-resource.openai.azure.com"
-            )
+        logger.info(f"Using Crusoe Managed Inference endpoint: {normalized_endpoint}")
+        logger.info(f"Model ID: {model_id}")
         
-        logger.info(f"Using Azure OpenAI endpoint: {normalized_endpoint}")
-        logger.info(f"Deployment name: {deployment_name}")
-        
-        self.client = AzureOpenAI(
-            azure_endpoint=normalized_endpoint,
-            api_key=api_key,
-            api_version=api_version
+        self.client = OpenAI(
+            base_url=normalized_endpoint,
+            api_key=CRUSOE_API_KEY
         )
-        self.deployment_name = deployment_name
+        self.model_id = model_id
         self.schema_context = get_schema_context()
         
-        logger.info(f"QueryGenerator initialized with deployment: {deployment_name}")
+        logger.info(f"QueryGenerator initialized with model: {model_id}")
     
     @retry(
         stop=stop_after_attempt(3),
@@ -94,17 +86,14 @@ class QueryGenerator:
         user_prompt = self._build_user_prompt(user_question, include_explanation)
         
         try:
-            # GPT-5.2 requires max_completion_tokens instead of max_tokens
-            # SDK 2.x supports max_completion_tokens directly
-            # Note: Not using response_format due to pydantic serialization bug in OpenAI SDK
-            # The system prompt already instructs the model to return JSON, so this should work fine
+            # Use standard max_tokens parameter for OpenAI-compatible API
             response = self.client.chat.completions.create(
                 model=self.deployment_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_completion_tokens=2000  # Limit response length for SQL queries
+                max_tokens=2000  # Limit response length for SQL queries
             )
             
             result_text = response.choices[0].message.content
@@ -223,15 +212,14 @@ Return your response as JSON with the following structure:
 """
         
         try:
-            # Note: Not using response_format due to pydantic serialization bug in OpenAI SDK
-            # The system prompt already instructs the model to return JSON
+            # Use standard max_tokens parameter for OpenAI-compatible API
             response = self.client.chat.completions.create(
                 model=self.deployment_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_completion_tokens=2000  # Limit response length for refined queries
+                max_tokens=2000  # Limit response length for refined queries
             )
             
             result_text = response.choices[0].message.content
@@ -286,15 +274,14 @@ Return your response as JSON:
 """
         
         try:
-            # Note: Not using response_format due to pydantic serialization bug in OpenAI SDK
-            # The prompt already instructs the model to return JSON
+            # Use standard max_tokens parameter for OpenAI-compatible API
             response = self.client.chat.completions.create(
                 model=self.deployment_name,
                 messages=[
                     {"role": "system", "content": "You are a data analysis assistant specializing in NYC taxi and ride-share data."},
                     {"role": "user", "content": prompt}
                 ],
-                max_completion_tokens=500  # Short explanations
+                max_tokens=500  # Short explanations
             )
             
             result_text = response.choices[0].message.content
@@ -390,22 +377,21 @@ class NarrativeGenerator:
     
     def __init__(
         self,
-        endpoint: str,
-        api_key: str,
-        deployment_name: str = "gpt-5.2-chat",
-        api_version: str = "2024-12-01-preview"
+        CRUSOE_INFERENCE_URL: str = environ.get("CRUSOE_INFERENCE_URL", "https://inference.api.crusoecloud.com/v1"),
+        CRUSOE_API_KEY: str = environ.get("CRUSOE_API_KEY"),
+        deployment_name: str = environ.get("CRUSOE_DEPLOYMENT_NAME", "gpt-5.2-chat"),
+        api_version: str = environ.get("CRUSOE_API_VERSION", "2024-12-01-preview")
     ):
-        """Initialize NarrativeGenerator with Azure OpenAI client"""
-        # Normalize endpoint: remove trailing slash
-        normalized_endpoint = endpoint.rstrip('/')
+        """Initialize NarrativeGenerator with Crusoe Managed Inference client"""
+        # Normalize CRUSOE_INFERENCE_URL: remove trailing slash
+        normalized_endpoint = CRUSOE_INFERENCE_URL.rstrip('/')
         
-        logger.info(f"Using Azure OpenAI endpoint: {normalized_endpoint}")
+        logger.info(f"Using Crusoe Managed Inference endpoint: {normalized_endpoint}")
         logger.info(f"Deployment name: {deployment_name}")
         
-        self.client = AzureOpenAI(
-            azure_endpoint=normalized_endpoint,
-            api_key=api_key,
-            api_version=api_version
+        self.client = OpenAI(
+            base_url=normalized_endpoint,
+            api_key=CRUSOE_API_KEY
         )
         self.deployment_name = deployment_name
         
@@ -474,7 +460,7 @@ Write in a professional but accessible tone. Use specific numbers from the resul
                     {"role": "system", "content": "You are a data analyst specializing in transportation and financial analysis."},
                     {"role": "user", "content": prompt}
                 ],
-                max_completion_tokens=1000  # Limit narrative length
+                max_tokens=1000  # Limit narrative length
             )
             
             narrative = response.choices[0].message.content

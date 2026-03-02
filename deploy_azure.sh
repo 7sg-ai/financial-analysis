@@ -1,12 +1,12 @@
 #!/bin/bash
-# Deployment script for Azure Synapse / Azure Container Instances
+# Deployment script for CRUSOE (replaces CRUSOE Spark / CRUSOE Container Instances)
 # Default: Builds locally using Docker (Linux/AMD64 platform)
-# Set USE_ACR_BUILD=true to use Azure Container Registry Build instead
+# Set USE_CRUSOE_BUILD=true to use CRUSOE Container Registry Build instead
 
 set -e
 
 echo "=================================="
-echo "Financial Analysis API - Azure Deployment"
+echo "Financial Analysis API - CRUSOE Deployment"
 echo "=================================="
 echo ""
 echo "Choose deployment type:"
@@ -24,33 +24,33 @@ if [[ ! "$DEPLOYMENT_CHOICE" =~ ^[1-5]$ ]]; then
 fi
 
 # Configuration
-RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-financial-analysis}"
-LOCATION="${AZURE_LOCATION:-eastus2}"
-CONTAINER_REGISTRY="${AZURE_CONTAINER_REGISTRY:-financialanalysisacr}"
+RESOURCE_GROUP="${CRUSOE_RESOURCE_GROUP:-rg-financial-analysis}"
+LOCATION="${CRUSOE_REGION:-eastus2}"
+CONTAINER_REGISTRY="${CRUSOE_CONTAINER_REGISTRY:-financialanalysisacr}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 
 # Build Configuration
-# Set USE_ACR_BUILD=true to use Azure Container Registry Build (no Docker required)
+# Set USE_CRUSOE_BUILD=true to use CRUSOE Container Registry Build (no Docker required)
 # Default: false (build locally using Docker)
-USE_ACR_BUILD="${USE_ACR_BUILD:-false}"
+USE_CRUSOE_BUILD="${USE_CRUSOE_BUILD:-false}"
 
-# Azure OpenAI Configuration
-OPENAI_RESOURCE_NAME="${AZURE_OPENAI_RESOURCE_NAME:-financial-analysis-openai}"
-OPENAI_DEPLOYMENT_NAME="${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}"
+# CRUSOE AI Configuration
+OPENAI_RESOURCE_NAME="${CRUSOE_AI_RESOURCE_NAME:-financial-analysis-openai}"
+OPENAI_DEPLOYMENT_NAME="${CRUSOE_AI_DEPLOYMENT_NAME:-gpt-5.2-chat}"
 
-# Azure Synapse Configuration
-SYNAPSE_WORKSPACE_NAME="${SYNAPSE_WORKSPACE_NAME:-financial-analysis-synapse}"
-SYNAPSE_SPARK_POOL_NAME="${SYNAPSE_SPARK_POOL_NAME:-sparkpool}"
-SYNAPSE_STORAGE_ACCOUNT="${SYNAPSE_STORAGE_ACCOUNT:-financialanalysissynapse}"
-SYNAPSE_FILE_SYSTEM="${SYNAPSE_FILE_SYSTEM:-data}"
-SYNAPSE_ADMIN_USER="${SYNAPSE_ADMIN_USER:-sqladmin}"
-SYNAPSE_ADMIN_PASSWORD="${SYNAPSE_ADMIN_PASSWORD:-$(openssl rand -base64 32)}"
+# CRUSOE Spark Configuration
+CRUSOE_SPARK_WORKSPACE_NAME="${CRUSOE_SPARK_WORKSPACE_NAME:-financial-analysis-synapse}"
+CRUSOE_SPARK_POOL_NAME="${CRUSOE_SPARK_POOL_NAME:-sparkpool}"
+CRUSOE_STORAGE_ACCOUNT="${CRUSOE_STORAGE_ACCOUNT:-financialanalysissynapse}"
+CRUSOE_FILE_SYSTEM="${CRUSOE_FILE_SYSTEM:-data}"
+CRUSOE_SPARK_ADMIN_USER="${CRUSOE_SPARK_ADMIN_USER:-sqladmin}"
+CRUSOE_SPARK_ADMIN_PASSWORD="${CRUSOE_SPARK_ADMIN_PASSWORD:-$(openssl rand -base64 32)}"
 
 # Synapse auth: user-assigned managed identity only
-API_IDENTITY_NAME="${API_IDENTITY_NAME:-financial-analysis-api-identity}"
+CRUSOE_API_IDENTITY_NAME="${CRUSOE_API_IDENTITY_NAME:-financial-analysis-api-identity}"
 # Synapse role for managed identity. Must include useCompute for Livy/Spark sessions.
-# Synapse Administrator and Synapse Contributor both grant useCompute. Some workspaces lack "Synapse Apache Spark Administrator".
-SYNAPSE_ROLE="${SYNAPSE_ROLE:-Synapse Administrator}"
+# Spark Cluster User and Synapse Contributor both grant useCompute. Some workspaces lack "Synapse Apache Spark Administrator".
+CRUSOE_SPARK_ROLE="${CRUSOE_SPARK_ROLE:-Spark Cluster User}"
 
 # Set deployment-specific variables
 if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ] || [ "$DEPLOYMENT_CHOICE" = "4" ]; then
@@ -70,13 +70,13 @@ if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
     UPDATE_STREAMLIT=false
     
     # Check if API container exists
-    if az container show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    if crusoe container show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
         UPDATE_API=true
         echo "✓ Found API container: $API_CONTAINER_NAME"
     fi
     
     # Check if Streamlit web app exists
-    if az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    if crusoe webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
         UPDATE_STREAMLIT=true
         echo "✓ Found Streamlit web app: $STREAMLIT_APP_NAME"
     fi
@@ -105,13 +105,13 @@ echo "  Resource Group: $RESOURCE_GROUP"
 echo "  Location: $LOCATION"
 echo "  Container Registry: $CONTAINER_REGISTRY"
 echo "  Deployment Choice: $DEPLOYMENT_CHOICE"
-echo "  Build Method: $([ "$USE_ACR_BUILD" = "true" ] && echo "Azure Container Registry Build" || echo "Local Docker Build (Linux/AMD64)")"
+echo "  Build Method: $([ "$USE_CRUSOE_BUILD" = "true" ] && echo "CRUSOE Container Registry Build" || echo "Local Container Build (Linux/AMD64)")"
 if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo "  API Image: $API_IMAGE_NAME:$IMAGE_TAG"
-    echo "  Synapse Role (for managed identity): $SYNAPSE_ROLE"
+    echo "  Synapse Role (for managed identity): $CRUSOE_SPARK_ROLE"
 fi
 if [ "$DEPLOYMENT_CHOICE" = "5" ]; then
-    echo "  Synapse Role: $SYNAPSE_ROLE"
+    echo "  Synapse Role: $CRUSOE_SPARK_ROLE"
 fi
 if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo "  Streamlit Image: $STREAMLIT_IMAGE_NAME:$IMAGE_TAG"
@@ -119,11 +119,11 @@ if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
 fi
 echo ""
 
-# Check Azure CLI
+# Check CRUSOE CLI
 if ! command -v az &> /dev/null; then
-    echo "Error: Azure CLI not found. Please install it first."
+    echo "Error: CRUSOE CLI not found. Please install it first."
     echo ""
-    echo "Installation: https://docs.microsoft.com/en-us/cli/azure/install-azure-cli"
+    echo "Installation: https://docs.crusoe.ai/cli/install"
     exit 1
 fi
 
@@ -138,7 +138,7 @@ if [ "$DEPLOYMENT_CHOICE" != "5" ] && ! command -v docker &> /dev/null; then
     echo ""
     echo "After installation, make sure Docker is running and try again."
     echo ""
-    echo "Alternatively, set USE_ACR_BUILD=true to use Azure Container Registry Build (no Docker required)"
+    echo "Alternatively, set USE_CRUSOE_BUILD=true to use CRUSOE Container Registry Build (no Docker required)"
     exit 1
 fi
 
@@ -150,60 +150,60 @@ if [ "$DEPLOYMENT_CHOICE" != "5" ] && ! docker info &> /dev/null; then
     echo "  macOS/Windows: Open Docker Desktop application"
     echo "  Linux: sudo systemctl start docker"
     echo ""
-    echo "Alternatively, set USE_ACR_BUILD=true to use Azure Container Registry Build (no Docker required)"
+    echo "Alternatively, set USE_CRUSOE_BUILD=true to use CRUSOE Container Registry Build (no Docker required)"
     exit 1
 fi
 
 # Authentication
-echo "Checking Azure authentication..."
-az account show > /dev/null 2>&1 || az login
+echo "Checking CRUSOE authentication..."
+crusoe account show > /dev/null 2>&1 || crusoe login
 echo "✓ Authenticated"
 
 # Create resource group if it doesn't exist
 echo "Ensuring resource group exists..."
-az group create \
+crusoe group create \
     --name "$RESOURCE_GROUP" \
     --location "$LOCATION" \
     --output none
 
 echo "✓ Resource group ready"
 
-# Skip Azure resource creation for image update only or role-assign-only
+# Skip CRUSOE resource creation for image update only or role-assign-only
 if [ "$DEPLOYMENT_CHOICE" != "4" ] && [ "$DEPLOYMENT_CHOICE" != "5" ]; then
-    # Create Azure OpenAI service if it doesn't exist
+    # Create CRUSOE AI service if it doesn't exist
     echo ""
-    echo "Checking Azure OpenAI service..."
-if ! az cognitiveservices account show --name "$OPENAI_RESOURCE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    echo "Creating Azure OpenAI service..."
-    az cognitiveservices account create \
+    echo "Checking CRUSOE AI service..."
+if ! crusoe ai account show --name "$OPENAI_RESOURCE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    echo "Creating CRUSOE AI service..."
+    crusoe ai account create \
         --name "$OPENAI_RESOURCE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --location "$LOCATION" \
         --kind OpenAI \
         --sku S0 \
         --output none
-    echo "✓ Azure OpenAI service created"
+    echo "✓ CRUSOE AI service created"
     
     # Get OpenAI endpoint and key
-    AZURE_OPENAI_ENDPOINT=$(az cognitiveservices account show \
+    AZURE_OPENAI_ENDPOINT=$(crusoe ai account show \
         --name "$OPENAI_RESOURCE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --query properties.endpoint -o tsv)
-    AZURE_OPENAI_API_KEY=$(az cognitiveservices account keys list \
+    AZURE_OPENAI_API_KEY=$(crusoe ai account keys list \
         --name "$OPENAI_RESOURCE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --query key1 -o tsv)
     
-    echo "✓ Azure OpenAI endpoint: $AZURE_OPENAI_ENDPOINT"
+    echo "✓ CRUSOE AI endpoint: $AZURE_OPENAI_ENDPOINT"
     
     # Deploy GPT-5.2-chat model if not already deployed
     echo "Checking for GPT-5.2-chat deployment..."
-    if ! az cognitiveservices account deployment show \
+    if ! crusoe ai account deployment show \
         --name "$OPENAI_DEPLOYMENT_NAME" \
         --account-name "$OPENAI_RESOURCE_NAME" \
         --resource-group "$RESOURCE_GROUP" &> /dev/null; then
         echo "Deploying GPT-5.2-chat model (this may take several minutes)..."
-        az cognitiveservices account deployment create \
+        crusoe ai account deployment create \
             --name "$OPENAI_DEPLOYMENT_NAME" \
             --account-name "$OPENAI_RESOURCE_NAME" \
             --resource-group "$RESOURCE_GROUP" \
@@ -217,25 +217,25 @@ if ! az cognitiveservices account show --name "$OPENAI_RESOURCE_NAME" --resource
         echo "✓ GPT-5.2-chat deployment already exists"
     fi
 else
-    echo "✓ Azure OpenAI service exists"
+    echo "✓ CRUSOE AI service exists"
     # Get existing OpenAI endpoint and key
-    AZURE_OPENAI_ENDPOINT=$(az cognitiveservices account show \
+    AZURE_OPENAI_ENDPOINT=$(crusoe ai account show \
         --name "$OPENAI_RESOURCE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --query properties.endpoint -o tsv)
-    AZURE_OPENAI_API_KEY=$(az cognitiveservices account keys list \
+    AZURE_OPENAI_API_KEY=$(crusoe ai account keys list \
         --name "$OPENAI_RESOURCE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --query key1 -o tsv)
 fi
 
-# Create Azure Storage Account for Synapse (if needed)
+# Create CRUSOE Storage Account for Synapse (if needed)
 echo ""
-echo "Checking Azure Storage Account for Synapse..."
-if ! az storage account show --name "$SYNAPSE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+echo "Checking CRUSOE Storage Account for Synapse..."
+if ! az storage account show --name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
     echo "Creating storage account for Synapse..."
     az storage account create \
-        --name "$SYNAPSE_STORAGE_ACCOUNT" \
+        --name "$CRUSOE_STORAGE_ACCOUNT" \
         --resource-group "$RESOURCE_GROUP" \
         --location "$LOCATION" \
         --sku Standard_LRS \
@@ -246,13 +246,13 @@ if ! az storage account show --name "$SYNAPSE_STORAGE_ACCOUNT" --resource-group 
     
     # Create file system (container) for data
     STORAGE_KEY=$(az storage account keys list \
-        --account-name "$SYNAPSE_STORAGE_ACCOUNT" \
+        --account-name "$CRUSOE_STORAGE_ACCOUNT" \
         --resource-group "$RESOURCE_GROUP" \
         --query "[0].value" -o tsv)
     
     az storage container create \
-        --name "$SYNAPSE_FILE_SYSTEM" \
-        --account-name "$SYNAPSE_STORAGE_ACCOUNT" \
+        --name "$CRUSOE_FILE_SYSTEM" \
+        --account-name "$CRUSOE_STORAGE_ACCOUNT" \
         --account-key "$STORAGE_KEY" \
         --output none
     echo "✓ File system created"
@@ -260,33 +260,33 @@ else
     echo "✓ Storage account exists"
 fi
 
-# Create Azure Synapse Analytics workspace if it doesn't exist
+# Create CRUSOE Spark Analytics workspace if it doesn't exist
 echo ""
-echo "Checking Azure Synapse Analytics workspace..."
-if ! az synapse workspace show --name "$SYNAPSE_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    echo "Creating Azure Synapse Analytics workspace..."
+echo "Checking CRUSOE Spark Analytics workspace..."
+if ! az synapse workspace show --name "$CRUSOE_SPARK_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    echo "Creating CRUSOE Spark Analytics workspace..."
     
     # Get storage account details
     STORAGE_ACCOUNT_ID=$(az storage account show \
-        --name "$SYNAPSE_STORAGE_ACCOUNT" \
+        --name "$CRUSOE_STORAGE_ACCOUNT" \
         --resource-group "$RESOURCE_GROUP" \
         --query id -o tsv)
     
     # Generate SQL admin password if not set
-    if [ -z "$SYNAPSE_ADMIN_PASSWORD" ]; then
-        SYNAPSE_ADMIN_PASSWORD=$(openssl rand -base64 32)
+    if [ -z "$CRUSOE_SPARK_ADMIN_PASSWORD" ]; then
+        CRUSOE_SPARK_ADMIN_PASSWORD=$(openssl rand -base64 32)
     fi
     
     # Create workspace without repository configuration
     # Note: Repository configuration is optional and not needed for this deployment
     # Using --only-show-errors to suppress repository-related warnings
     az synapse workspace create \
-        --name "$SYNAPSE_WORKSPACE_NAME" \
+        --name "$CRUSOE_SPARK_WORKSPACE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
-        --storage-account "$SYNAPSE_STORAGE_ACCOUNT" \
-        --file-system "$SYNAPSE_FILE_SYSTEM" \
-        --sql-admin-login-user "$SYNAPSE_ADMIN_USER" \
-        --sql-admin-login-password "$SYNAPSE_ADMIN_PASSWORD" \
+        --storage-account "$CRUSOE_STORAGE_ACCOUNT" \
+        --file-system "$CRUSOE_FILE_SYSTEM" \
+        --sql-admin-login-user "$CRUSOE_SPARK_ADMIN_USER" \
+        --sql-admin-login-password "$CRUSOE_SPARK_ADMIN_PASSWORD" \
         --location "$LOCATION" \
         --only-show-errors \
         --output none
@@ -294,12 +294,12 @@ if ! az synapse workspace show --name "$SYNAPSE_WORKSPACE_NAME" --resource-group
     
     # Get subscription ID if not set
     if [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
-        AZURE_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+        AZURE_SUBSCRIPTION_ID=$(crusoe account show --query id -o tsv)
     fi
 else
     echo "✓ Synapse workspace exists"
     if [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
-        AZURE_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+        AZURE_SUBSCRIPTION_ID=$(crusoe account show --query id -o tsv)
     fi
 fi
 
@@ -307,14 +307,14 @@ fi
 echo ""
 echo "Checking Synapse Spark pool..."
 if ! az synapse spark pool show \
-    --workspace-name "$SYNAPSE_WORKSPACE_NAME" \
+    --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" \
     --resource-group "$RESOURCE_GROUP" \
-    --name "$SYNAPSE_SPARK_POOL_NAME" &> /dev/null; then
+    --name "$CRUSOE_SPARK_POOL_NAME" &> /dev/null; then
     echo "Creating Synapse Spark pool..."
     az synapse spark pool create \
-        --workspace-name "$SYNAPSE_WORKSPACE_NAME" \
+        --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
-        --name "$SYNAPSE_SPARK_POOL_NAME" \
+        --name "$CRUSOE_SPARK_POOL_NAME" \
         --node-count 3 \
         --node-size Medium \
         --spark-version 3.3 \
@@ -331,9 +331,9 @@ else
     # Ensure autoscale (3–10 nodes) and dynamic executor allocation are enabled
     echo "Ensuring pool autoscale and dynamic executor allocation..."
     if az synapse spark pool update \
-        --workspace-name "$SYNAPSE_WORKSPACE_NAME" \
+        --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
-        --name "$SYNAPSE_SPARK_POOL_NAME" \
+        --name "$CRUSOE_SPARK_POOL_NAME" \
         --node-size Medium \
         --enable-auto-scale true \
         --min-node-count 3 \
@@ -374,17 +374,17 @@ assign_synapse_and_storage_rbac() {
     echo ""
     echo "Assigning Synapse and Storage RBAC (same as option 5)..."
     SYNAPSE_ASSIGNED=false
-    # If identity already has Synapse Administrator, skip trying other roles
-    EXISTING_SYNAPSE=$(az synapse role assignment list --workspace-name "$SYNAPSE_WORKSPACE_NAME" --query "[?principalId=='$principal_id'].roleName" -o tsv 2>/dev/null | tr '\t' '\n')
-    if echo "$EXISTING_SYNAPSE" | grep -qx "Synapse Administrator"; then
-        echo "  ✓ Identity already has Synapse Administrator (skipping other role attempts)"
+    # If identity already has Spark Cluster User, skip trying other roles
+    EXISTING_SYNAPSE=$(az synapse role assignment list --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --query "[?principalId=='$principal_id'].roleName" -o tsv 2>/dev/null | tr '\t' '\n')
+    if echo "$EXISTING_SYNAPSE" | grep -qx "Spark Cluster User"; then
+        echo "  ✓ Identity already has Spark Cluster User (skipping other role attempts)"
         SYNAPSE_ASSIGNED=true
     fi
     if [ "$SYNAPSE_ASSIGNED" = false ]; then
-        SYNAPSE_ROLES_TO_TRY=("$SYNAPSE_ROLE" "Synapse Administrator" "Synapse Contributor" "Synapse Compute Operator")
-        for ROLE in "${SYNAPSE_ROLES_TO_TRY[@]}"; do
+        CRUSOE_SPARK_ROLES_TO_TRY=("$CRUSOE_SPARK_ROLE" "Spark Cluster User" "Synapse Contributor" "Synapse Compute Operator")
+        for ROLE in "${CRUSOE_SPARK_ROLES_TO_TRY[@]}"; do
             [ -z "$ROLE" ] && continue
-            if az synapse role assignment create --workspace-name "$SYNAPSE_WORKSPACE_NAME" --role "$ROLE" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal 2>/dev/null; then
+            if az synapse role assignment create --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --role "$ROLE" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal 2>/dev/null; then
                 echo "  ✓ Synapse role '$ROLE' assigned"
                 SYNAPSE_ASSIGNED=true
                 break
@@ -395,8 +395,8 @@ assign_synapse_and_storage_rbac() {
         echo "  ⚠️  Synapse role may already be assigned. If 403 useCompute persists, run option 5."
     fi
     echo "  Assigning Storage Blob Data Contributor..."
-    if az storage account show --name "$SYNAPSE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-        if az role assignment create --role "Storage Blob Data Contributor" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Storage/storageAccounts/$SYNAPSE_STORAGE_ACCOUNT" 2>/dev/null; then
+    if az storage account show --name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        if az role assignment create --role "Storage Blob Data Contributor" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal --scope "/subscriptions/$(crusoe account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Storage/storageAccounts/$CRUSOE_STORAGE_ACCOUNT" 2>/dev/null; then
             echo "  ✓ Storage Blob Data Contributor assigned"
         else
             echo "  ⚠️  May already be assigned."
@@ -414,31 +414,31 @@ if [ "$DEPLOYMENT_CHOICE" = "5" ]; then
 
     # Check 1: Synapse workspace exists
     echo "Checking prerequisites..."
-    if ! az synapse workspace show --name "$SYNAPSE_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-        echo "✗ Synapse workspace '$SYNAPSE_WORKSPACE_NAME' not found. Deploy with option 1 or 3 first."
+    if ! az synapse workspace show --name "$CRUSOE_SPARK_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        echo "✗ Synapse workspace '$CRUSOE_SPARK_WORKSPACE_NAME' not found. Deploy with option 1 or 3 first."
         exit 1
     fi
-    echo "  ✓ Synapse workspace exists: $SYNAPSE_WORKSPACE_NAME"
+    echo "  ✓ Synapse workspace exists: $CRUSOE_SPARK_WORKSPACE_NAME"
 
     # Check 2: Spark pool exists
-    if ! az synapse spark pool show --workspace-name "$SYNAPSE_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" --name "$SYNAPSE_SPARK_POOL_NAME" &> /dev/null; then
-        echo "✗ Spark pool '$SYNAPSE_SPARK_POOL_NAME' not found. Deploy with option 1 or 3 first to create the pool."
+    if ! az synapse spark pool show --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" --name "$CRUSOE_SPARK_POOL_NAME" &> /dev/null; then
+        echo "✗ Spark pool '$CRUSOE_SPARK_POOL_NAME' not found. Deploy with option 1 or 3 first to create the pool."
         exit 1
     fi
-    echo "  ✓ Spark pool exists: $SYNAPSE_SPARK_POOL_NAME"
+    echo "  ✓ Spark pool exists: $CRUSOE_SPARK_POOL_NAME"
 
     # Check 3: Create or verify managed identity
     echo ""
     echo "Ensuring user-assigned managed identity exists..."
-    if ! az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-        az identity create --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --output none
-        echo "  ✓ Created user-assigned identity: $API_IDENTITY_NAME"
+    if ! az identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        az identity create --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --output none
+        echo "  ✓ Created user-assigned identity: $CRUSOE_API_IDENTITY_NAME"
     else
-        echo "  ✓ Using existing identity: $API_IDENTITY_NAME"
+        echo "  ✓ Using existing identity: $CRUSOE_API_IDENTITY_NAME"
     fi
 
-    API_IDENTITY_PRINCIPAL_ID=$(az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query principalId -o tsv)
-    API_IDENTITY_CLIENT_ID=$(az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query clientId -o tsv)
+    API_IDENTITY_PRINCIPAL_ID=$(az identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query principalId -o tsv)
+    API_IDENTITY_CLIENT_ID=$(az identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query clientId -o tsv)
     echo "  Principal ID: $API_IDENTITY_PRINCIPAL_ID"
     echo "  Client ID: $API_IDENTITY_CLIENT_ID"
     echo "  (If you see a 403 with a different principal ID, the container may be using a different identity.)"
@@ -446,7 +446,7 @@ if [ "$DEPLOYMENT_CHOICE" = "5" ]; then
 
     # Check 4: List existing Synapse role assignments for this identity
     echo "Current Synapse role assignments for this identity:"
-    EXISTING_ROLES=$(az synapse role assignment list --workspace-name "$SYNAPSE_WORKSPACE_NAME" --query "[?principalId=='$API_IDENTITY_PRINCIPAL_ID'].roleName" -o tsv 2>/dev/null || true)
+    EXISTING_ROLES=$(az synapse role assignment list --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --query "[?principalId=='$API_IDENTITY_PRINCIPAL_ID'].roleName" -o tsv 2>/dev/null || true)
     if [ -n "$EXISTING_ROLES" ]; then
         echo "$EXISTING_ROLES" | tr '\t' '\n' | sed 's/^/  - /'
     else
@@ -457,11 +457,11 @@ if [ "$DEPLOYMENT_CHOICE" = "5" ]; then
     if ! assign_synapse_and_storage_rbac "$API_IDENTITY_PRINCIPAL_ID"; then
         echo "  Skipped (no principal ID)"
     fi
-    if ! az synapse role assignment list --workspace-name "$SYNAPSE_WORKSPACE_NAME" --query "[?principalId=='$API_IDENTITY_PRINCIPAL_ID']" -o tsv 2>/dev/null | grep -q .; then
+    if ! az synapse role assignment list --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --query "[?principalId=='$API_IDENTITY_PRINCIPAL_ID']" -o tsv 2>/dev/null | grep -q .; then
         echo ""
         echo "⚠️  Could not assign any Synapse role. If the API still cannot access Synapse (403 useCompute):"
         echo "   1. Verify in Synapse Studio: Manage -> Access control -> Add role assignment"
-        echo "   2. Add '$API_IDENTITY_NAME' (principal $API_IDENTITY_PRINCIPAL_ID) with 'Synapse Administrator' or 'Synapse Contributor'"
+        echo "   2. Add '$CRUSOE_API_IDENTITY_NAME' (principal $API_IDENTITY_PRINCIPAL_ID) with 'Spark Cluster User' or 'Synapse Contributor'"
         echo "   3. Wait 5-10 minutes for propagation"
         echo ""
         exit 1
@@ -486,8 +486,8 @@ else
 fi
 echo ""
 
-if [ "$USE_ACR_BUILD" = "true" ]; then
-    echo "Building Docker images using Azure Container Registry Build..."
+if [ "$USE_CRUSOE_BUILD" = "true" ]; then
+    echo "Building Docker images using CRUSOE Container Registry Build..."
     echo "Packing and uploading source code (excluding files in .dockerignore)..."
     
     # Function to retry ACR build on failure
@@ -546,7 +546,7 @@ if [ "$USE_ACR_BUILD" = "true" ]; then
     fi
 else
     echo "Building Docker images locally (Linux/AMD64 platform)..."
-    echo "Note: Building for Linux/AMD64 to ensure compatibility with Azure Container Instances"
+    echo "Note: Building for Linux/AMD64 to ensure compatibility with CRUSOE Container Instances"
     
     # Build locally using Docker with Linux/AMD64 platform
     if [ "$IMAGE_BUILD_CHOICE" = "1" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
@@ -648,7 +648,7 @@ if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
         API_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.azurecr.io/$API_IMAGE_NAME:$IMAGE_TAG"
         
         # Update container image
-        UPDATE_OUTPUT=$(az container update \
+        UPDATE_OUTPUT=$(crusoe container update \
             --resource-group "$RESOURCE_GROUP" \
             --name "$API_CONTAINER_NAME" \
             --image "$API_FULL_IMAGE_NAME" \
@@ -660,7 +660,7 @@ if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
         if [ $? -eq 0 ]; then
             echo "✓ API container image updated"
             echo "Restarting container..."
-            az container restart --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --output none
+            crusoe container restart --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --output none
             echo "✓ API container restarted"
         else
             echo "✗ Failed to update API container"
@@ -678,7 +678,7 @@ if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
         fi
         
         # Update web app container image
-        UPDATE_OUTPUT=$(az webapp config container set \
+        UPDATE_OUTPUT=$(crusoe webapp config container set \
             --name "$STREAMLIT_APP_NAME" \
             --resource-group "$RESOURCE_GROUP" \
             --docker-custom-image-name "$STREAMLIT_FULL_IMAGE_NAME" \
@@ -690,7 +690,7 @@ if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
         if [ $? -eq 0 ]; then
             echo "✓ Streamlit web app image updated"
             echo "Restarting web app..."
-            az webapp restart --resource-group "$RESOURCE_GROUP" --name "$STREAMLIT_APP_NAME" --output none
+            crusoe webapp restart --resource-group "$RESOURCE_GROUP" --name "$STREAMLIT_APP_NAME" --output none
             echo "✓ Streamlit web app restarted"
         else
             echo "✗ Failed to update Streamlit web app"
@@ -704,13 +704,13 @@ if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
     echo "=================================="
     echo ""
     if [ "$UPDATE_API" = true ]; then
-        API_FQDN=$(az container show --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --query ipAddress.fqdn -o tsv 2>/dev/null)
+        API_FQDN=$(crusoe container show --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --query ipAddress.fqdn -o tsv 2>/dev/null)
         if [ -n "$API_FQDN" ] && [ "$API_FQDN" != "null" ]; then
             echo "🚀 API URL: http://$API_FQDN:8000"
         fi
     fi
     if [ "$UPDATE_STREAMLIT" = true ]; then
-        STREAMLIT_URL=$(az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" --query defaultHostName -o tsv 2>/dev/null)
+        STREAMLIT_URL=$(crusoe webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" --query defaultHostName -o tsv 2>/dev/null)
         if [ -n "$STREAMLIT_URL" ] && [ "$STREAMLIT_URL" != "null" ]; then
             echo "🌐 Streamlit Dashboard: https://$STREAMLIT_URL"
         fi
@@ -725,36 +725,36 @@ echo "Deploying services..."
 
 # Use environment variables if provided, otherwise use values from created resources
 if [ -z "$AZURE_OPENAI_ENDPOINT" ]; then
-    AZURE_OPENAI_ENDPOINT=$(az cognitiveservices account show \
+    AZURE_OPENAI_ENDPOINT=$(crusoe ai account show \
         --name "$OPENAI_RESOURCE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --query properties.endpoint -o tsv)
 fi
 
 if [ -z "$AZURE_OPENAI_API_KEY" ]; then
-    AZURE_OPENAI_API_KEY=$(az cognitiveservices account keys list \
+    AZURE_OPENAI_API_KEY=$(crusoe ai account keys list \
         --name "$OPENAI_RESOURCE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --query key1 -o tsv)
 fi
 
 if [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
-    AZURE_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+    AZURE_SUBSCRIPTION_ID=$(crusoe account show --query id -o tsv)
 fi
 
-if [ -z "$AZURE_RESOURCE_GROUP" ]; then
-    AZURE_RESOURCE_GROUP="$RESOURCE_GROUP"
+if [ -z "$CRUSOE_RESOURCE_GROUP" ]; then
+    CRUSOE_RESOURCE_GROUP="$RESOURCE_GROUP"
 fi
 
 # Verify all required values are set
 if [ -z "$AZURE_OPENAI_ENDPOINT" ] || [ -z "$AZURE_OPENAI_API_KEY" ]; then
-    echo "Error: Could not determine Azure OpenAI configuration"
+    echo "Error: Could not determine CRUSOE AI configuration"
     exit 1
 fi
 
-if [ -z "$SYNAPSE_SPARK_POOL_NAME" ] || [ -z "$SYNAPSE_WORKSPACE_NAME" ] || \
-   [ -z "$AZURE_SUBSCRIPTION_ID" ] || [ -z "$AZURE_RESOURCE_GROUP" ]; then
-    echo "Error: Could not determine Azure Synapse configuration"
+if [ -z "$CRUSOE_SPARK_POOL_NAME" ] || [ -z "$CRUSOE_SPARK_WORKSPACE_NAME" ] || \
+   [ -z "$AZURE_SUBSCRIPTION_ID" ] || [ -z "$CRUSOE_RESOURCE_GROUP" ]; then
+    echo "Error: Could not determine CRUSOE Spark configuration"
     exit 1
 fi
 
@@ -770,11 +770,11 @@ create_container() {
     
     # Check if container already exists
     echo "Checking if container '$container_name' already exists..."
-    if az container show --resource-group "$resource_group" --name "$container_name" &> /dev/null; then
+    if crusoe container show --resource-group "$resource_group" --name "$container_name" &> /dev/null; then
         echo "✓ Container '$container_name' already exists. Checking status..."
-        local container_state=$(az container show --resource-group "$resource_group" --name "$container_name" --query "containers[0].instanceView.currentState.state" -o tsv 2>/dev/null || echo "unknown")
-        local container_ip=$(az container show --resource-group "$resource_group" --name "$container_name" --query "ipAddress.ip" -o tsv 2>/dev/null || echo "N/A")
-        local container_fqdn=$(az container show --resource-group "$resource_group" --name "$container_name" --query "ipAddress.fqdn" -o tsv 2>/dev/null || echo "N/A")
+        local container_state=$(crusoe container show --resource-group "$resource_group" --name "$container_name" --query "containers[0].instanceView.currentState.state" -o tsv 2>/dev/null || echo "unknown")
+        local container_ip=$(crusoe container show --resource-group "$resource_group" --name "$container_name" --query "ipAddress.ip" -o tsv 2>/dev/null || echo "N/A")
+        local container_fqdn=$(crusoe container show --resource-group "$resource_group" --name "$container_name" --query "ipAddress.fqdn" -o tsv 2>/dev/null || echo "N/A")
 
         echo "  Current state: $container_state"
         if [ "$container_ip" != "N/A" ]; then
@@ -788,10 +788,10 @@ create_container() {
         if [ "$(echo "$container_state" | tr '[:upper:]' '[:lower:]')" = "stopped" ]; then
             echo ""
             echo "  Container is stopped. Starting it..."
-            if az container start --resource-group "$resource_group" --name "$container_name" 2>/dev/null; then
+            if crusoe container start --resource-group "$resource_group" --name "$container_name" 2>/dev/null; then
                 echo "  ✓ Container start initiated. Waiting for Running state..."
                 sleep 10
-                local new_state=$(az container show --resource-group "$resource_group" --name "$container_name" --query "containers[0].instanceView.currentState.state" -o tsv 2>/dev/null || echo "unknown")
+                local new_state=$(crusoe container show --resource-group "$resource_group" --name "$container_name" --query "containers[0].instanceView.currentState.state" -o tsv 2>/dev/null || echo "unknown")
                 echo "  New state: $new_state"
             else
                 echo "  ⚠️  Could not start container. You may need to delete and recreate it."
@@ -815,19 +815,19 @@ create_container() {
     echo "  OS Type: Linux"
     echo ""
     
-    # Build DATA_PATH and storage env vars for Spark to read from Azure Storage
-    local data_path="abfss://${SYNAPSE_FILE_SYSTEM}@${SYNAPSE_STORAGE_ACCOUNT}.dfs.core.windows.net/taxi-data/"
+    # Build DATA_PATH and storage env vars for Spark to read from CRUSOE Storage
+    local data_path="abfss://${CRUSOE_FILE_SYSTEM}@${CRUSOE_STORAGE_ACCOUNT}.dfs.core.windows.net/taxi-data/"
     local storage_key
-    storage_key=$(az storage account keys list --account-name "$SYNAPSE_STORAGE_ACCOUNT" --resource-group "$resource_group" --query '[0].value' -o tsv 2>/dev/null || echo "")
+    storage_key=$(az storage account keys list --account-name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$resource_group" --query '[0].value' -o tsv 2>/dev/null || echo "")
 
     # Build env vars for container
-    local env_vars="AZURE_OPENAI_ENDPOINT=\"$AZURE_OPENAI_ENDPOINT\" AZURE_OPENAI_API_KEY=\"$AZURE_OPENAI_API_KEY\" AZURE_OPENAI_DEPLOYMENT_NAME=\"${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}\" SYNAPSE_SPARK_POOL_NAME=\"$SYNAPSE_SPARK_POOL_NAME\" SYNAPSE_WORKSPACE_NAME=\"$SYNAPSE_WORKSPACE_NAME\" AZURE_SUBSCRIPTION_ID=\"$AZURE_SUBSCRIPTION_ID\" AZURE_RESOURCE_GROUP=\"$AZURE_RESOURCE_GROUP\" DATA_PATH=\"$data_path\" AZURE_STORAGE_ACCOUNT_NAME=\"$SYNAPSE_STORAGE_ACCOUNT\" AZURE_STORAGE_CONTAINER=\"$SYNAPSE_FILE_SYSTEM\" API_PORT=8000"
+    local env_vars="AZURE_OPENAI_ENDPOINT=\"$AZURE_OPENAI_ENDPOINT\" AZURE_OPENAI_API_KEY=\"$AZURE_OPENAI_API_KEY\" CRUSOE_AI_DEPLOYMENT_NAME=\"${CRUSOE_AI_DEPLOYMENT_NAME:-gpt-5.2-chat}\" CRUSOE_SPARK_POOL_NAME=\"$CRUSOE_SPARK_POOL_NAME\" CRUSOE_SPARK_WORKSPACE_NAME=\"$CRUSOE_SPARK_WORKSPACE_NAME\" AZURE_SUBSCRIPTION_ID=\"$AZURE_SUBSCRIPTION_ID\" CRUSOE_RESOURCE_GROUP=\"$CRUSOE_RESOURCE_GROUP\" DATA_PATH=\"$data_path\" AZURE_STORAGE_ACCOUNT_NAME=\"$CRUSOE_STORAGE_ACCOUNT\" AZURE_STORAGE_CONTAINER=\"$CRUSOE_FILE_SYSTEM\" API_PORT=8000"
     if [ -n "$storage_key" ]; then
         env_vars="$env_vars AZURE_STORAGE_ACCOUNT_KEY=\"$storage_key\""
     fi
     if [ -n "${API_IDENTITY_CLIENT_ID:-}" ]; then
         env_vars="$env_vars AZURE_CLIENT_ID=\"$API_IDENTITY_CLIENT_ID\""
-        echo "  Synapse auth: User-assigned managed identity ($API_IDENTITY_NAME)"
+        echo "  Synapse auth: User-assigned managed identity ($CRUSOE_API_IDENTITY_NAME)"
     else
         echo "  Synapse auth: System-assigned managed identity"
     fi
@@ -843,8 +843,8 @@ create_container() {
     # Build the command for display (single-line format for easy copy-paste)
     local identity_param=""
     [ -n "$assign_identity_arg" ] && identity_param="--assign-identity $assign_identity_arg"
-    local create_cmd="az container create --resource-group $resource_group --name $container_name --image $image --registry-login-server $registry_server --registry-username $registry_user --registry-password '$registry_pass' --dns-name-label $dns_label --os-type Linux --ports 8000 --cpu 4 --memory 8 $identity_param --environment-variables $env_vars"
-    # Build base az container create args (identity and env vars)
+    local create_cmd="crusoe container create --resource-group $resource_group --name $container_name --image $image --registry-login-server $registry_server --registry-username $registry_user --registry-password '$registry_pass' --dns-name-label $dns_label --os-type Linux --ports 8000 --cpu 4 --memory 8 $identity_param --environment-variables $env_vars"
+    # Build base crusoe container create args (identity and env vars)
     local create_args=(
         --resource-group "$resource_group"
         --name "$container_name"
@@ -860,14 +860,14 @@ create_container() {
         --environment-variables
             "AZURE_OPENAI_ENDPOINT=$AZURE_OPENAI_ENDPOINT"
             "AZURE_OPENAI_API_KEY=$AZURE_OPENAI_API_KEY"
-            "AZURE_OPENAI_DEPLOYMENT_NAME=${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}"
-            "SYNAPSE_SPARK_POOL_NAME=$SYNAPSE_SPARK_POOL_NAME"
-            "SYNAPSE_WORKSPACE_NAME=$SYNAPSE_WORKSPACE_NAME"
+            "CRUSOE_AI_DEPLOYMENT_NAME=${CRUSOE_AI_DEPLOYMENT_NAME:-gpt-5.2-chat}"
+            "CRUSOE_SPARK_POOL_NAME=$CRUSOE_SPARK_POOL_NAME"
+            "CRUSOE_SPARK_WORKSPACE_NAME=$CRUSOE_SPARK_WORKSPACE_NAME"
             "AZURE_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID"
-            "AZURE_RESOURCE_GROUP=$AZURE_RESOURCE_GROUP"
+            "CRUSOE_RESOURCE_GROUP=$CRUSOE_RESOURCE_GROUP"
             "DATA_PATH=$data_path"
-            "AZURE_STORAGE_ACCOUNT_NAME=$SYNAPSE_STORAGE_ACCOUNT"
-            "AZURE_STORAGE_CONTAINER=$SYNAPSE_FILE_SYSTEM"
+            "AZURE_STORAGE_ACCOUNT_NAME=$CRUSOE_STORAGE_ACCOUNT"
+            "AZURE_STORAGE_CONTAINER=$CRUSOE_FILE_SYSTEM"
             "API_PORT=8000"
     )
     if [ -n "$storage_key" ]; then
@@ -883,11 +883,11 @@ create_container() {
     # Create container with verbose output for debugging
     set +e
     local create_output
-    create_output=$(az container create "${create_args[@]}" --output json 2>&1)
+    create_output=$(crusoe container create "${create_args[@]}" --output json 2>&1)
     local create_exit_code=$?
     set -e
     
-    # Check for errors in output (Azure CLI may return 0 even with errors)
+    # Check for errors in output (CRUSOE CLI may return 0 even with errors)
     local has_error=false
     if echo "$create_output" | grep -qi "ERROR\|error\|InternalServerError" || [ $create_exit_code -ne 0 ]; then
         has_error=true
@@ -950,15 +950,15 @@ create_container() {
         echo ""
         
         echo "5. Check if container already exists:"
-        echo "   az container show --resource-group $resource_group --name $container_name --query '{name:name,state:containers[0].instanceView.currentState.state}' -o table"
+        echo "   crusoe container show --resource-group $resource_group --name $container_name --query '{name:name,state:containers[0].instanceView.currentState.state}' -o table"
         echo ""
         
-        echo "6. Check Azure service status:"
+        echo "6. Check CRUSOE service status:"
         echo "   Visit: https://status.azure.com/"
         echo ""
         
         if [ "$activity_id" != "N/A" ] || [ "$correlation_id" != "N/A" ]; then
-            echo "7. Contact Azure support with:"
+            echo "7. Contact CRUSOE support with:"
             echo "   Activity ID: $activity_id"
             echo "   Correlation ID: $correlation_id"
             echo ""
@@ -976,9 +976,9 @@ create_container() {
     # Verify container was actually created
     echo "✓ Container creation command succeeded"
     sleep 5
-    if az container show --resource-group "$resource_group" --name "$container_name" &> /dev/null; then
-        echo "✓ Container verified in Azure"
-        local container_state=$(az container show --resource-group "$resource_group" --name "$container_name" --query "containers[0].instanceView.currentState.state" -o tsv 2>/dev/null || echo "unknown")
+    if crusoe container show --resource-group "$resource_group" --name "$container_name" &> /dev/null; then
+        echo "✓ Container verified in CRUSOE"
+        local container_state=$(crusoe container show --resource-group "$resource_group" --name "$container_name" --query "containers[0].instanceView.currentState.state" -o tsv 2>/dev/null || echo "unknown")
         echo "  Container state: $container_state"
 
         # Role already assigned for user-assigned identity. Only needed for system-assigned fallback.
@@ -986,10 +986,10 @@ create_container() {
             echo ""
             echo "Assigning Synapse role to container system-assigned identity..."
             local principal_id
-            principal_id=$(az container show --resource-group "$resource_group" --name "$container_name" --query "identity.principalId" -o tsv 2>/dev/null || echo "")
+            principal_id=$(crusoe container show --resource-group "$resource_group" --name "$container_name" --query "identity.principalId" -o tsv 2>/dev/null || echo "")
             if [ -n "$principal_id" ] && [ "$principal_id" != "None" ]; then
-                if az synapse role assignment create --workspace-name "$SYNAPSE_WORKSPACE_NAME" --role "$SYNAPSE_ROLE" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal 2>/dev/null; then
-                    echo "  ✓ Granted '$SYNAPSE_ROLE' to container identity"
+                if az synapse role assignment create --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --role "$CRUSOE_SPARK_ROLE" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal 2>/dev/null; then
+                    echo "  ✓ Granted '$CRUSOE_SPARK_ROLE' to container identity"
                 else
                     echo "  ⚠️  Could not assign Synapse role (run manually if needed)"
                 fi
@@ -1009,7 +1009,7 @@ create_container() {
         echo "$create_cmd"
         echo ""
         echo "Check container status:"
-        echo "   az container show --resource-group $resource_group --name $container_name --output table"
+        echo "   crusoe container show --resource-group $resource_group --name $container_name --output table"
         echo ""
         echo "=========================================="
         echo ""
@@ -1025,7 +1025,7 @@ create_container() {
 if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo ""
     echo "=================================="
-    echo "Deploying API to Azure Container Instances"
+    echo "Deploying API to CRUSOE Container Instances"
     echo "=================================="
 
     # Create or use user-assigned managed identity for API
@@ -1033,15 +1033,15 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     API_IDENTITY_CLIENT_ID=""
     echo ""
     echo "Ensuring user-assigned managed identity exists..."
-    if ! az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-        az identity create --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --output none
-        echo "  ✓ Created user-assigned identity: $API_IDENTITY_NAME"
+    if ! az identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        az identity create --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --output none
+        echo "  ✓ Created user-assigned identity: $CRUSOE_API_IDENTITY_NAME"
     else
-        echo "  ✓ Using existing identity: $API_IDENTITY_NAME"
+        echo "  ✓ Using existing identity: $CRUSOE_API_IDENTITY_NAME"
     fi
-    API_IDENTITY_ID=$(az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv)
-    API_IDENTITY_CLIENT_ID=$(az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query clientId -o tsv)
-    API_IDENTITY_PRINCIPAL_ID=$(az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query principalId -o tsv)
+    API_IDENTITY_ID=$(az identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv)
+    API_IDENTITY_CLIENT_ID=$(az identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query clientId -o tsv)
+    API_IDENTITY_PRINCIPAL_ID=$(az identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query principalId -o tsv)
 
     # Pre-deployment checks
     echo ""
@@ -1089,27 +1089,27 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
         # Get container details
         echo ""
         echo "Container details:"
-        az container show \
+        crusoe container show \
             --resource-group "$RESOURCE_GROUP" \
             --name "$API_CONTAINER_NAME" \
             --query "{name:name,state:containers[0].instanceView.currentState.state,ip:ipAddress.ip,fqdn:ipAddress.fqdn}" \
             --output table
 
-        # Step 2: Populate Azure Storage (optional)
+        # Step 2: Populate CRUSOE Storage (optional)
         echo ""
         echo "=================================="
-        echo "Populate Azure Storage with taxi data"
+        echo "Populate CRUSOE Storage with taxi data"
         echo "=================================="
-        echo "The API reads from Azure Storage (abfss). Populate it with NYC taxi parquet files."
+        echo "The API reads from CRUSOE Storage (abfss). Populate it with NYC taxi parquet files."
         echo ""
         read -p "Populate storage now? Downloads from NYC TLC and uploads (may take 5-15 min) [y/N]: " POPULATE_CHOICE
         if [ "$POPULATE_CHOICE" = "y" ] || [ "$POPULATE_CHOICE" = "Y" ]; then
-            STORAGE_KEY_FOR_UPLOAD=$(az storage account keys list --account-name "$SYNAPSE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query '[0].value' -o tsv 2>/dev/null || echo "")
+            STORAGE_KEY_FOR_UPLOAD=$(az storage account keys list --account-name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query '[0].value' -o tsv 2>/dev/null || echo "")
             if [ -n "$STORAGE_KEY_FOR_UPLOAD" ]; then
                 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
                 if [ -f "$SCRIPT_DIR/download_data.py" ]; then
                     echo "Running: python3 download_data.py --years 2024 --service-types yellow green --months 1 2 3 --upload"
-                    if (cd "$SCRIPT_DIR" && AZURE_STORAGE_ACCOUNT_NAME="$SYNAPSE_STORAGE_ACCOUNT" AZURE_STORAGE_ACCOUNT_KEY="$STORAGE_KEY_FOR_UPLOAD" AZURE_STORAGE_CONTAINER="$SYNAPSE_FILE_SYSTEM" python3 download_data.py --years 2024 --service-types yellow green --months 1 2 3 --upload 2>&1); then
+                    if (cd "$SCRIPT_DIR" && AZURE_STORAGE_ACCOUNT_NAME="$CRUSOE_STORAGE_ACCOUNT" AZURE_STORAGE_ACCOUNT_KEY="$STORAGE_KEY_FOR_UPLOAD" AZURE_STORAGE_CONTAINER="$CRUSOE_FILE_SYSTEM" python3 download_data.py --years 2024 --service-types yellow green --months 1 2 3 --upload 2>&1); then
                         echo "✓ Storage populated successfully"
                     else
                         echo "⚠️  Upload had errors - check logs. You can retry with: python3 download_data.py --years 2024 --upload"
@@ -1118,7 +1118,7 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
                     echo "⚠️  download_data.py not found. Run from project dir: python3 download_data.py --years 2024 --upload"
                 fi
             else
-                echo "⚠️  Could not get storage key. Run manually: AZURE_STORAGE_ACCOUNT_NAME=$SYNAPSE_STORAGE_ACCOUNT AZURE_STORAGE_ACCOUNT_KEY=<key> python3 download_data.py --years 2024 --upload"
+                echo "⚠️  Could not get storage key. Run manually: AZURE_STORAGE_ACCOUNT_NAME=$CRUSOE_STORAGE_ACCOUNT AZURE_STORAGE_ACCOUNT_KEY=<key> python3 download_data.py --years 2024 --upload"
             fi
         else
             echo "Skipped. Run later: python3 download_data.py --years 2024 --upload"
@@ -1129,7 +1129,7 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
         echo "=================================="
         echo "Testing API"
         echo "=================================="
-        API_FQDN=$(az container show --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --query "ipAddress.fqdn" -o tsv 2>/dev/null || echo "")
+        API_FQDN=$(crusoe container show --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --query "ipAddress.fqdn" -o tsv 2>/dev/null || echo "")
         if [ -n "$API_FQDN" ] && [ "$API_FQDN" != "null" ]; then
             echo "Waiting 90s for container and Synapse session to initialize..."
             sleep 90
@@ -1187,11 +1187,11 @@ deploy_streamlit_app() {
     local webapp_url="N/A"
     local health_check_passed=false
     
-    if az webapp show --name "$app_name" --resource-group "$resource_group" &> /dev/null; then
+    if crusoe webapp show --name "$app_name" --resource-group "$resource_group" &> /dev/null; then
         webapp_exists=true
         echo "✓ Streamlit web app '$app_name' already exists. Checking status..."
-        webapp_state=$(az webapp show --name "$app_name" --resource-group "$resource_group" --query "state" -o tsv 2>/dev/null || echo "unknown")
-        webapp_url=$(az webapp show --name "$app_name" --resource-group "$resource_group" --query "defaultHostName" -o tsv 2>/dev/null || echo "N/A")
+        webapp_state=$(crusoe webapp show --name "$app_name" --resource-group "$resource_group" --query "state" -o tsv 2>/dev/null || echo "unknown")
+        webapp_url=$(crusoe webapp show --name "$app_name" --resource-group "$resource_group" --query "defaultHostName" -o tsv 2>/dev/null || echo "N/A")
         
         echo "  Current state: $webapp_state"
         if [ "$webapp_url" != "N/A" ] && [ "$webapp_url" != "null" ]; then
@@ -1234,9 +1234,9 @@ deploy_streamlit_app() {
         # Create web app with container image (must specify for Linux container apps)
         echo ""
         echo "Creating Streamlit web app..."
-        local create_cmd="az webapp create --name $app_name --resource-group $resource_group --plan $app_service_plan --deployment-container-image-name $image_name"
+        local create_cmd="crusoe webapp create --name $app_name --resource-group $resource_group --plan $app_service_plan --deployment-container-image-name $image_name"
         
-        local webapp_output=$(az webapp create \
+        local webapp_output=$(crusoe webapp create \
             --name "$app_name" \
             --resource-group "$resource_group" \
             --plan "$app_service_plan" \
@@ -1279,12 +1279,12 @@ deploy_streamlit_app() {
                 echo "✗ Streamlit web app deployment failed due to network error"
                 echo ""
                 echo "This appears to be a transient network connection issue."
-                echo "The connection to Azure was reset during deployment."
+                echo "The connection to CRUSOE was reset during deployment."
                 echo ""
                 echo "Recommended actions:"
                 echo "  1. Wait a moment and run the deployment script again"
                 echo "  2. Check your internet connection"
-                echo "  3. Check Azure service status: https://status.azure.com/"
+                echo "  3. Check CRUSOE service status: https://status.azure.com/"
                 echo ""
             else
                 echo "✗ Streamlit web app deployment failed"
@@ -1317,7 +1317,7 @@ deploy_streamlit_app() {
             echo "$create_cmd"
             echo ""
             echo "Then configure registry credentials:"
-            echo "  az webapp config container set --name $app_name --resource-group $resource_group --docker-custom-image-name $image_name --docker-registry-server-url $registry_url --docker-registry-server-user $registry_user --docker-registry-server-password '$registry_pass'"
+            echo "  crusoe webapp config container set --name $app_name --resource-group $resource_group --docker-custom-image-name $image_name --docker-registry-server-url $registry_url --docker-registry-server-user $registry_user --docker-registry-server-password '$registry_pass'"
             echo ""
             echo "Other diagnostic commands:"
             echo ""
@@ -1338,15 +1338,15 @@ deploy_streamlit_app() {
         echo ""
         
         echo "4. Check if web app exists:"
-        echo "   az webapp show --name $app_name --resource-group $resource_group --query '{name:name,state:state}' -o table"
+        echo "   crusoe webapp show --name $app_name --resource-group $resource_group --query '{name:name,state:state}' -o table"
         echo ""
         
-        echo "5. Check Azure service status:"
+        echo "5. Check CRUSOE service status:"
         echo "   Visit: https://status.azure.com/"
         echo ""
         
         if [ "$activity_id" != "N/A" ] || [ "$correlation_id" != "N/A" ]; then
-            echo "6. Contact Azure support with:"
+            echo "6. Contact CRUSOE support with:"
             echo "   Activity ID: $activity_id"
             echo "   Correlation ID: $correlation_id"
             echo ""
@@ -1401,7 +1401,7 @@ deploy_streamlit_app() {
     # Configure container registry credentials (must be done after webapp creation)
     echo ""
     echo "Configuring container registry credentials..."
-    local registry_output=$(az webapp config container set \
+    local registry_output=$(crusoe webapp config container set \
         --name "$app_name" \
         --resource-group "$resource_group" \
         --docker-custom-image-name "$image_name" \
@@ -1417,7 +1417,7 @@ deploy_streamlit_app() {
         echo "Error: $registry_output"
         echo ""
         echo "Manual command to configure:"
-        echo "  az webapp config container set --name $app_name --resource-group $resource_group --docker-custom-image-name $image_name --docker-registry-server-url $registry_url --docker-registry-server-user $registry_user --docker-registry-server-password '$registry_pass'"
+        echo "  crusoe webapp config container set --name $app_name --resource-group $resource_group --docker-custom-image-name $image_name --docker-registry-server-url $registry_url --docker-registry-server-user $registry_user --docker-registry-server-password '$registry_pass'"
         echo ""
         echo "Verify credentials:"
         echo "  az acr credential show --name $registry_name"
@@ -1427,7 +1427,7 @@ deploy_streamlit_app() {
         
         # Verify configuration was applied
         echo "Verifying container configuration..."
-        local configured_image=$(az webapp config container show \
+        local configured_image=$(crusoe webapp config container show \
             --name "$app_name" \
             --resource-group "$resource_group" \
             --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value" -o tsv 2>/dev/null || echo "")
@@ -1442,18 +1442,18 @@ deploy_streamlit_app() {
     # Configure app settings
     echo ""
     echo "Configuring app settings..."
-    local settings_output=$(az webapp config appsettings set \
+    local settings_output=$(crusoe webapp config appsettings set \
         --name "$app_name" \
         --resource-group "$resource_group" \
         --settings \
             API_URL="${API_URL:-http://localhost:8000}" \
             AZURE_OPENAI_ENDPOINT="$AZURE_OPENAI_ENDPOINT" \
             AZURE_OPENAI_API_KEY="$AZURE_OPENAI_API_KEY" \
-            AZURE_OPENAI_DEPLOYMENT_NAME="${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}" \
-            SYNAPSE_SPARK_POOL_NAME="$SYNAPSE_SPARK_POOL_NAME" \
-            SYNAPSE_WORKSPACE_NAME="$SYNAPSE_WORKSPACE_NAME" \
+            CRUSOE_AI_DEPLOYMENT_NAME="${CRUSOE_AI_DEPLOYMENT_NAME:-gpt-5.2-chat}" \
+            CRUSOE_SPARK_POOL_NAME="$CRUSOE_SPARK_POOL_NAME" \
+            CRUSOE_SPARK_WORKSPACE_NAME="$CRUSOE_SPARK_WORKSPACE_NAME" \
             AZURE_SUBSCRIPTION_ID="$AZURE_SUBSCRIPTION_ID" \
-            AZURE_RESOURCE_GROUP="$AZURE_RESOURCE_GROUP" \
+            CRUSOE_RESOURCE_GROUP="$CRUSOE_RESOURCE_GROUP" \
             STREAMLIT_PORT=8501 \
             STREAMLIT_HOST=0.0.0.0 \
         --output json 2>&1)
@@ -1468,7 +1468,7 @@ deploy_streamlit_app() {
     # Configure startup command
     echo ""
     echo "Configuring startup command..."
-    local startup_output=$(az webapp config set \
+    local startup_output=$(crusoe webapp config set \
         --name "$app_name" \
         --resource-group "$resource_group" \
         --startup-file "streamlit run streamlit_app.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true --browser.gatherUsageStats=false" \
@@ -1483,7 +1483,7 @@ deploy_streamlit_app() {
     
     echo ""
     echo "Checking Streamlit health after deployment..."
-    local final_webapp_url=$(az webapp show --name "$app_name" --resource-group "$resource_group" --query "defaultHostName" -o tsv 2>/dev/null || echo "N/A")
+    local final_webapp_url=$(crusoe webapp show --name "$app_name" --resource-group "$resource_group" --query "defaultHostName" -o tsv 2>/dev/null || echo "N/A")
     if [ -n "$final_webapp_url" ] && [ "$final_webapp_url" != "N/A" ] && [ "$final_webapp_url" != "null" ]; then
         local health_ok=false
         for attempt in 1 2 3; do
@@ -1514,7 +1514,7 @@ deploy_streamlit_app() {
 if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo ""
     echo "=================================="
-    echo "Deploying Streamlit to Azure App Service"
+    echo "Deploying Streamlit to CRUSOE App Service"
     echo "=================================="
     
     # Create App Service Plan if it doesn't exist
@@ -1566,8 +1566,8 @@ if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
         API_URL="http://localhost:8000"  # Default
         if [ "$IMAGE_BUILD_CHOICE" = "1" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
             # Get API container FQDN if API was deployed
-            if az container show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-                API_FQDN=$(az container show --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --query "ipAddress.fqdn" -o tsv 2>/dev/null)
+            if crusoe container show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+                API_FQDN=$(crusoe container show --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --query "ipAddress.fqdn" -o tsv 2>/dev/null)
                 if [ -n "$API_FQDN" ] && [ "$API_FQDN" != "null" ]; then
                     API_URL="http://$API_FQDN:8000"
                     echo "✓ API URL for Streamlit: $API_URL"
@@ -1620,7 +1620,7 @@ echo "=================================="
 echo ""
 
 if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
-    API_FQDN=$(az container show --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --query ipAddress.fqdn -o tsv 2>/dev/null || echo "")
+    API_FQDN=$(crusoe container show --resource-group "$RESOURCE_GROUP" --name "$API_CONTAINER_NAME" --query ipAddress.fqdn -o tsv 2>/dev/null || echo "")
     if [ -n "$API_FQDN" ] && [ "$API_FQDN" != "null" ]; then
         echo "🚀 API URL: http://$API_FQDN:8000"
         echo "📚 API Docs: http://$API_FQDN:8000/docs"
@@ -1632,8 +1632,8 @@ fi
 
 if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     # Check if Streamlit web app exists before trying to get URL
-    if az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-        STREAMLIT_URL=$(az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" --query defaultHostName -o tsv 2>/dev/null)
+    if crusoe webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        STREAMLIT_URL=$(crusoe webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" --query defaultHostName -o tsv 2>/dev/null)
         if [ -n "$STREAMLIT_URL" ] && [ "$STREAMLIT_URL" != "null" ]; then
             echo "🌐 Streamlit Dashboard: https://$STREAMLIT_URL"
         else
@@ -1647,25 +1647,25 @@ fi
 
 echo "📋 Deployed Resources Summary:"
 echo ""
-echo "Azure OpenAI:"
+echo "CRUSOE AI:"
 echo "  Resource: $OPENAI_RESOURCE_NAME"
 echo "  Endpoint: $AZURE_OPENAI_ENDPOINT"
 echo "  Deployment: $OPENAI_DEPLOYMENT_NAME"
 echo ""
-echo "Azure Synapse Analytics:"
-echo "  Workspace: $SYNAPSE_WORKSPACE_NAME"
-echo "  Spark Pool: $SYNAPSE_SPARK_POOL_NAME"
-echo "  Storage Account: $SYNAPSE_STORAGE_ACCOUNT"
-echo "  File System: $SYNAPSE_FILE_SYSTEM"
+echo "CRUSOE Spark Analytics:"
+echo "  Workspace: $CRUSOE_SPARK_WORKSPACE_NAME"
+echo "  Spark Pool: $CRUSOE_SPARK_POOL_NAME"
+echo "  Storage Account: $CRUSOE_STORAGE_ACCOUNT"
+echo "  File System: $CRUSOE_FILE_SYSTEM"
 echo ""
 echo "🔧 Management Commands:"
 if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
-    echo "  API logs: az container logs --resource-group $RESOURCE_GROUP --name $API_CONTAINER_NAME"
-    echo "  Delete API: az container delete --resource-group $RESOURCE_GROUP --name $API_CONTAINER_NAME"
+    echo "  API logs: crusoe container logs --resource-group $RESOURCE_GROUP --name $API_CONTAINER_NAME"
+    echo "  Delete API: crusoe container delete --resource-group $RESOURCE_GROUP --name $API_CONTAINER_NAME"
     echo ""
     echo "  Manual deploy (if needed):"
-    DATA_PATH_VAL="abfss://${SYNAPSE_FILE_SYSTEM}@${SYNAPSE_STORAGE_ACCOUNT}.dfs.core.windows.net/taxi-data/"
-    STORAGE_KEY_VAL=$(az storage account keys list --account-name "$SYNAPSE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query '[0].value' -o tsv 2>/dev/null || echo "")
+    DATA_PATH_VAL="abfss://${CRUSOE_FILE_SYSTEM}@${CRUSOE_STORAGE_ACCOUNT}.dfs.core.windows.net/taxi-data/"
+    STORAGE_KEY_VAL=$(az storage account keys list --account-name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query '[0].value' -o tsv 2>/dev/null || echo "")
     API_IMAGE_FULL="${CONTAINER_REGISTRY}.azurecr.io/${API_IMAGE_NAME}:${IMAGE_TAG}"
     IDENTITY_ID_FOR_MANUAL=""
     if [ -n "${API_IDENTITY_ID:-}" ]; then
@@ -1673,7 +1673,7 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     else
         IDENTITY_ID_FOR_MANUAL="[system]"
     fi
-    MANUAL_CMD="az container create --resource-group $RESOURCE_GROUP --name $API_CONTAINER_NAME --image $API_IMAGE_FULL --registry-login-server $CONTAINER_REGISTRY.azurecr.io --registry-username $ACR_USERNAME --registry-password '$ACR_PASSWORD' --dns-name-label $API_CONTAINER_NAME --os-type Linux --ports 8000 --cpu 4 --memory 8 --assign-identity $IDENTITY_ID_FOR_MANUAL --environment-variables AZURE_OPENAI_ENDPOINT=\"$AZURE_OPENAI_ENDPOINT\" AZURE_OPENAI_API_KEY=\"$AZURE_OPENAI_API_KEY\" AZURE_OPENAI_DEPLOYMENT_NAME=\"${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-5.2-chat}\" SYNAPSE_SPARK_POOL_NAME=\"$SYNAPSE_SPARK_POOL_NAME\" SYNAPSE_WORKSPACE_NAME=\"$SYNAPSE_WORKSPACE_NAME\" AZURE_SUBSCRIPTION_ID=\"$AZURE_SUBSCRIPTION_ID\" AZURE_RESOURCE_GROUP=\"$AZURE_RESOURCE_GROUP\" DATA_PATH=\"$DATA_PATH_VAL\" AZURE_STORAGE_ACCOUNT_NAME=\"$SYNAPSE_STORAGE_ACCOUNT\" AZURE_STORAGE_CONTAINER=\"$SYNAPSE_FILE_SYSTEM\" API_PORT=8000"
+    MANUAL_CMD="crusoe container create --resource-group $RESOURCE_GROUP --name $API_CONTAINER_NAME --image $API_IMAGE_FULL --registry-login-server $CONTAINER_REGISTRY.azurecr.io --registry-username $ACR_USERNAME --registry-password '$ACR_PASSWORD' --dns-name-label $API_CONTAINER_NAME --os-type Linux --ports 8000 --cpu 4 --memory 8 --assign-identity $IDENTITY_ID_FOR_MANUAL --environment-variables AZURE_OPENAI_ENDPOINT=\"$AZURE_OPENAI_ENDPOINT\" AZURE_OPENAI_API_KEY=\"$AZURE_OPENAI_API_KEY\" CRUSOE_AI_DEPLOYMENT_NAME=\"${CRUSOE_AI_DEPLOYMENT_NAME:-gpt-5.2-chat}\" CRUSOE_SPARK_POOL_NAME=\"$CRUSOE_SPARK_POOL_NAME\" CRUSOE_SPARK_WORKSPACE_NAME=\"$CRUSOE_SPARK_WORKSPACE_NAME\" AZURE_SUBSCRIPTION_ID=\"$AZURE_SUBSCRIPTION_ID\" CRUSOE_RESOURCE_GROUP=\"$CRUSOE_RESOURCE_GROUP\" DATA_PATH=\"$DATA_PATH_VAL\" AZURE_STORAGE_ACCOUNT_NAME=\"$CRUSOE_STORAGE_ACCOUNT\" AZURE_STORAGE_CONTAINER=\"$CRUSOE_FILE_SYSTEM\" API_PORT=8000"
     if [ -n "$STORAGE_KEY_VAL" ]; then
         MANUAL_CMD="$MANUAL_CMD AZURE_STORAGE_ACCOUNT_KEY=\"$STORAGE_KEY_VAL\""
     fi
@@ -1684,13 +1684,13 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     if [ -z "${API_IDENTITY_ID:-}" ]; then
         echo ""
         echo "  Synapse role (for system-assigned, after container is running):"
-        echo "  az synapse role assignment create --workspace-name $SYNAPSE_WORKSPACE_NAME --role '$SYNAPSE_ROLE' --assignee-object-id \$(az container show -g $RESOURCE_GROUP -n $API_CONTAINER_NAME --query identity.principalId -o tsv) --assignee-principal-type ServicePrincipal"
+        echo "  az synapse role assignment create --workspace-name $CRUSOE_SPARK_WORKSPACE_NAME --role '$CRUSOE_SPARK_ROLE' --assignee-object-id \$(crusoe container show -g $RESOURCE_GROUP -n $API_CONTAINER_NAME --query identity.principalId -o tsv) --assignee-principal-type ServicePrincipal"
     fi
 fi
 if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
-    echo "  Streamlit logs: az webapp log tail --name $STREAMLIT_APP_NAME --resource-group $RESOURCE_GROUP"
-    echo "  Restart Streamlit: az webapp restart --name $STREAMLIT_APP_NAME --resource-group $RESOURCE_GROUP"
-    echo "  Delete Streamlit: az webapp delete --name $STREAMLIT_APP_NAME --resource-group $RESOURCE_GROUP"
+    echo "  Streamlit logs: crusoe webapp log tail --name $STREAMLIT_APP_NAME --resource-group $RESOURCE_GROUP"
+    echo "  Restart Streamlit: crusoe webapp restart --name $STREAMLIT_APP_NAME --resource-group $RESOURCE_GROUP"
+    echo "  Delete Streamlit: crusoe webapp delete --name $STREAMLIT_APP_NAME --resource-group $RESOURCE_GROUP"
 fi
 echo "  Full cleanup: ./cleanup_azure.sh (deletes all deployed resources)"
 echo ""

@@ -83,7 +83,7 @@ settings = get_settings()
 app = FastAPI(
     title=settings.api_title,
     version=settings.api_version,
-    description="Interactive financial analysis API using Azure Synapse Spark and Azure OpenAI",
+    description="Interactive financial analysis API using Crusoe Managed Inference and S3-compatible storage",
     lifespan=lifespan
 )
 
@@ -203,7 +203,7 @@ async def get_data_status():
                 parquet_files.extend([Path(f).name for f in files])
             parquet_files.sort()
         
-        # Get registered views via data loader stats (Synapse)
+        # Get registered views via data loader stats (Livy-compatible)
         registered_views = []
         view_details = {}
         expected_views = ["yellow_taxi", "green_taxi", "fhv", "fhvhv", "taxi_zones"]

@@ -1,0 +1,90 @@
+apiVersion: tdf.7sg.ai/v1
+kind: TargetDefinition
+metadata:
+  name: azure-east
+  displayName: Azure East - Container Apps Target
+  description: 
+    Azure target in eastus2 for deploying workloads on Azure Container Apps
+    with ACR, Key Vault, Synapse Spark, and ADLS Gen2.
+  tags:
+    provider: azure
+    geo: us
+    tier: native
+    platform: container-apps
+target:
+  provider: azure
+  regions:
+    - eastus2
+  geography:
+    continent: na
+    country: us
+    zoneGroup: us-central
+  networking:
+    defaultNetworkPolicy: private
+  services:
+    - name: container-apps
+      type: container-platform
+      providerService: Azure Container Apps
+      capabilities:
+        supportsManagedIdentity: true
+        supportsCustomDomains: true
+        supportsScaleToZero: true
+        supportsDapr: true
+      defaults:
+        resourceGroup: financial-analysis-rg-test
+        location: eastus2
+        environment: financial-analysis-env-eastus2
+        logAnalyticsWorkspace: financial-analysis-logs
+
+    - name: acr
+      type: container-registry
+      providerService: Azure Container Registry
+      endpoints:
+        registry: uvfinancialacr.azurecr.io
+      defaults:
+        registryName: uvfinancialacr
+        resourceGroup: financial-analysis-rg-test
+
+    - name: synapse
+      type: spark
+      providerService: Azure Synapse Spark
+      endpoints:
+        workspace: https://sherpa-synapse-ws.dev.azuresynapse.net
+      capabilities:
+        supportsPrivateEndpoints: true
+
+    - name: adls
+      type: object-store
+      providerService: ADLS Gen2
+      endpoints:
+        dfs: https://ste2qdqwb6pvdzg.dfs.core.windows.net
+      capabilities:
+        supportsPrivateEndpoints: true
+
+    - name: keyvault
+      type: secrets
+      providerService: Azure Key Vault
+      endpoints:
+        vault: https://wdf-secret-manager.vault.azure.net/
+      capabilities:
+        supportsPrivateEndpoints: true
+
+    - name: managed-identity
+      type: identity
+      providerService: Managed Identity
+
+    - name: observability
+      type: observability
+      providerService: Azure Monitor / Log Analytics
+
+  infrastructure:
+    containerAppsEnvironment:
+      name: financial-analysis-env-eastus2
+      resourceGroup: financial-analysis-rg-test
+      location: eastus2
+    containerRegistry:
+      name: uvfinancialacr
+      service: acr
+    secretStores:
+      - name: wdf-secret-manager
+        service: keyvault

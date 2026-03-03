@@ -1,0 +1,361 @@
+apiVersion: wdf.7sg.ai/v2
+kind: WorkloadDefinition
+metadata:
+  name: financial-analysis-scenarios
+  description: FastAPI + Streamlit financial analysis app with two scenarios -
+    native (gpt-5-mini) and alternate (gpt-4.1-mini) on Azure Container Apps.
+  tags:
+    env: prod
+security:
+  network:
+    defaultExposure: private
+  identity:
+    workloadIdentity: true
+secrets:
+  provider: azureKeyVault
+  secretRefs:
+  - name: azure-openai-endpoint
+    injectAs: env
+    envVar: AZURE_OPENAI_ENDPOINT
+    externalRef:
+      provider: azure-keyvault
+      key: azure-openai-endpoint
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-openai-api-key
+    injectAs: env
+    envVar: AZURE_OPENAI_API_KEY
+    externalRef:
+      provider: azure-keyvault
+      key: azure-openai-api-key
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-synapse-workspace-name
+    injectAs: env
+    envVar: AZURE_SYNAPSE_WORKSPACE_NAME
+    externalRef:
+      provider: azure-keyvault
+      key: azure-synapse-workspace-name
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-synapse-spark-pool-name
+    injectAs: env
+    envVar: AZURE_SYNAPSE_SPARK_POOL_NAME
+    externalRef:
+      provider: azure-keyvault
+      key: azure-synapse-spark-pool-name
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-storage-account-name
+    injectAs: env
+    envVar: AZURE_STORAGE_ACCOUNT_NAME
+    externalRef:
+      provider: azure-keyvault
+      key: azure-storage-account-name
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-storage-account-key
+    injectAs: env
+    envVar: AZURE_STORAGE_ACCOUNT_KEY
+    externalRef:
+      provider: azure-keyvault
+      key: azure-storage-account-key
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-storage-container
+    injectAs: env
+    envVar: AZURE_STORAGE_CONTAINER
+    externalRef:
+      provider: azure-keyvault
+      key: azure-storage-container
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: synapse-spark-pool-name
+    injectAs: env
+    envVar: synapse_spark_pool_name
+    externalRef:
+      provider: azure-keyvault
+      key: synapse-spark-pool-name
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: synapse-workspace-name
+    injectAs: env
+    envVar: synapse_workspace_name
+    externalRef:
+      provider: azure-keyvault
+      key: synapse-workspace-name
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-subscription-id
+    injectAs: env
+    envVar: azure_subscription_id
+    externalRef:
+      provider: azure-keyvault
+      key: azure-subscription-id
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-resource-group
+    injectAs: env
+    envVar: azure_resource_group
+    externalRef:
+      provider: azure-keyvault
+      key: azure-resource-group
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: langfuse_secret_key
+    injectAs: env
+    envVar: LANGFUSE_SECRET_KEY
+    externalRef:
+      provider: azure-keyvault
+      key: langfuse_secret_key
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: langfuse_public_key
+    injectAs: env
+    envVar: LANGFUSE_PUBLIC_KEY
+    externalRef:
+      provider: azure-keyvault
+      key: langfuse_public_key
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: langfuse_host
+    injectAs: env
+    envVar: LANGFUSE_HOST
+    externalRef:
+      provider: langfuse_host
+      key: azure-resource-group
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+dataSources:
+  inputs:
+  - name: llm-endpoint
+    dsdfRef: dsdf/llm-endpoint.dsdf.yaml
+  outputs: []
+scenarios:
+  native:
+    description: 'Azure Container Apps with gpt-5-mini: standard deployment using
+      Azure OpenAI for LLM-powered financial queries on NYC taxi data.'
+    topology:
+      components:
+      - &api
+        name: financial-analysis-api
+        role: api
+        runtime:
+          platform: container-apps
+          regions:
+          - eastus2
+          image:
+            registry: uvfinancialacr.azurecr.io
+            repository: financial-analysis-api
+            tag: latest
+          env:
+          - name: API_HOST
+            value: 0.0.0.0
+          - name: API_PORT
+            value: '8000'
+          - name: LOG_LEVEL
+            value: INFO
+          - name: DATA_PATH
+            value: ./src_data
+          - name: AZURE_OPENAI_DEPLOYMENT_NAME
+            value: gpt-5-mini
+          - name: AZURE_OPENAI_API_VERSION
+            value: 2024-02-15-preview
+          envFromSecretRefs:
+          - azure-openai-endpoint
+          - azure-openai-api-key
+          - azure-synapse-workspace-name
+          - azure-synapse-spark-pool-name
+          - azure-storage-account-name
+          - azure-storage-account-key
+          - azure-storage-container
+          - azure-subscription-id
+          - azure-resource-group
+          resources:
+            cpu: '2'
+            memory: 4Gi
+          autoscaling:
+            minReplicas: 1
+            maxReplicas: 3
+            policy:
+              metric: cpu
+              target: 70
+        endpoints:
+        - name: http
+          port: 8000
+          exposure: internal
+          protocol: http
+          path: /
+      - &ui
+        name: financial-analysis-ui
+        role: ui
+        runtime:
+          platform: container-apps
+          regions:
+          - eastus2
+          image:
+            registry: uvfinancialacr.azurecr.io
+            repository: financial-analysis-streamlit
+            tag: latest
+          env:
+          - name: STREAMLIT_HOST
+            value: 0.0.0.0
+          - name: STREAMLIT_PORT
+            value: '8501'
+          - name: API_URL
+            value: http://financial-analysis-api:8000
+          envFromSecretRefs: []
+          resources:
+            cpu: '2'
+            memory: 4Gi
+          autoscaling:
+            minReplicas: 1
+            maxReplicas: 2
+            policy:
+              metric: cpu
+              target: 70
+        endpoints:
+        - name: http
+          port: 8501
+          exposure: public
+          protocol: http
+          path: /
+        dependsOn:
+        - financial-analysis-api
+    deployments:
+    - name: azure-container-apps-gpt5mini
+      target:
+        provider: azure
+        region: eastus2
+        tdfRef: azure-east
+        cluster: financial-analysis-env-eastus2
+        namespace: financial-analysis
+      identityRef: azure-managed-identity://financial-analysis
+      secretStores:
+        primary: wdf-secret-manager
+      components:
+      - financial-analysis-api
+      - financial-analysis-ui
+      overrides:
+        components:
+          financial-analysis-api:
+            runtime:
+              image:
+                registry: uvfinancialacr.azurecr.io
+                repository: financial-analysis-api
+                tag: latest
+          financial-analysis-ui:
+            runtime:
+              image:
+                registry: uvfinancialacr.azurecr.io
+                repository: financial-analysis-streamlit
+                tag: latest
+  alternates:
+  - name: azure-container-apps-gpt4-mini
+    description: 'Same Azure Container Apps setup but using gpt-4.1-mini model instead
+      of gpt-5-mini. Uses the same Key Vault and infrastructure for cost-effective
+      scenario comparison.'
+    topology:
+      components:
+      - name: financial-analysis-api
+        role: api
+        runtime:
+          platform: container-apps
+          regions:
+          - eastus2
+          image:
+            registry: uvfinancialacr.azurecr.io
+            repository: financial-analysis-api
+            tag: latest
+          env:
+          - name: API_HOST
+            value: 0.0.0.0
+          - name: API_PORT
+            value: '8000'
+          - name: LOG_LEVEL
+            value: INFO
+          - name: DATA_PATH
+            value: ./src_data
+          - name: AZURE_OPENAI_DEPLOYMENT_NAME
+            value: gpt-4.1-mini
+          - name: AZURE_OPENAI_API_VERSION
+            value: 2024-02-15-preview
+          envFromSecretRefs:
+          - azure-openai-endpoint
+          - azure-openai-api-key
+          - azure-synapse-workspace-name
+          - azure-synapse-spark-pool-name
+          - azure-storage-account-name
+          - azure-storage-account-key
+          - azure-storage-container
+          - azure-subscription-id
+          - azure-resource-group
+          resources:
+            cpu: '2'
+            memory: 4Gi
+          autoscaling:
+            minReplicas: 1
+            maxReplicas: 3
+            policy:
+              metric: cpu
+              target: 70
+        endpoints:
+        - name: http
+          port: 8000
+          exposure: internal
+          protocol: http
+          path: /
+      - name: financial-analysis-ui
+        role: ui
+        runtime:
+          platform: container-apps
+          regions:
+          - eastus2
+          image:
+            registry: uvfinancialacr.azurecr.io
+            repository: financial-analysis-streamlit
+            tag: latest
+          env:
+          - name: STREAMLIT_HOST
+            value: 0.0.0.0
+          - name: STREAMLIT_PORT
+            value: '8501'
+          - name: API_URL
+            value: http://financial-analysis-api:8000
+          envFromSecretRefs: []
+          resources:
+            cpu: '2'
+            memory: 4Gi
+          autoscaling:
+            minReplicas: 1
+            maxReplicas: 2
+            policy:
+              metric: cpu
+              target: 70
+        endpoints:
+        - name: http
+          port: 8501
+          exposure: public
+          protocol: http
+          path: /
+        dependsOn:
+        - financial-analysis-api
+    deployments:
+    - name: azure-container-apps-gpt4-mini
+      target:
+        provider: azure
+        region: eastus2
+        tdfRef: azure-east-fa-alt
+        cluster: financial-analysis-alt-env-eastus2
+        namespace: financial-analysis-alt
+      identityRef: azure-managed-identity://financial-analysis
+      secretStores:
+        primary: wdf-secret-manager
+      components:
+      - financial-analysis-api
+      - financial-analysis-ui
+      overrides:
+        components:
+          financial-analysis-api:
+            runtime:
+              image:
+                registry: uvfinancialacr.azurecr.io
+                repository: financial-analysis-api
+                tag: latest
+              env:
+              - name: AZURE_OPENAI_DEPLOYMENT_NAME
+                value: gpt-4.1-mini
+              - name: AZURE_OPENAI_API_VERSION
+                value: 2024-02-15-preview
+          financial-analysis-ui:
+            runtime:
+              image:
+                registry: uvfinancialacr.azurecr.io
+                repository: financial-analysis-streamlit
+                tag: latest

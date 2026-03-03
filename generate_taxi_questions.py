@@ -4,7 +4,8 @@ Generate 100 taxi data questions, test them against the API, and save results.
 """
 
 import json
-import requests
+from openai import OpenAI
+import os
 import time
 from datetime import datetime
 

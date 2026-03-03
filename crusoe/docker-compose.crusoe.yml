@@ -1,0 +1,62 @@
+version: "3.8"
+
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: changeme-secure-password
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    image: registry.us-east1-a.ccr.crusoecloudcompute.com/financial-analysis-api.28e7f623/financial-analysis-api:latest
+    container_name: financial-analysis-api
+    ports:
+      - "8000:8000"
+    environment:
+      LLM_BASE_URL: "https://owl.7sg.ai/qwen/v1"
+      LLM_MODEL_NAME: "Qwen/Qwen3-Coder-Next-FP8"
+      LLM_API_KEY: ""
+      DATA_PATH: "/app/src_data"
+    depends_on:
+      minio:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  streamlit:
+    image: registry.us-east1-a.ccr.crusoecloudcompute.com/financial-analysis-streamlit.28e7f623/financial-analysis-streamlit:latest
+    container_name: financial-analysis-streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      API_URL: "http://api:8000"
+    depends_on:
+      - api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  minio-data:

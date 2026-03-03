@@ -66,7 +66,7 @@ class DuckDBSession:
             if self._s3_access_key:
                 self._conn.execute(f"SET s3_access_key_id='{self._s3_access_key}'")
             if self._s3_secret_key:
-                self._conn.execute(f"SET s3_secret='{self._s3_secret_key}'")
+                self._conn.execute(f"SET s3_secret_access_key='{self._s3_secret_key}'")
             if self._s3_region:
                 self._conn.execute(f"SET s3_region='{self._s3_region}'")
             logger.info("DuckDB configured for S3 storage: %s", self._s3_endpoint)

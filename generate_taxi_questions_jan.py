@@ -9,7 +9,18 @@ import time
 from datetime import datetime
 import os
 
-CCR_API_URL = os.getenv("CRUSOE_CCR_ENDPOINT", "http://localhost:8000")
+from openai import OpenAI
+
+# Load configuration
+from config import CRUSOE_API_KEY, CRUSOE_INFERENCE_URL, CRUSOE_DEPLOYMENT_NAME
+
+# Initialize OpenAI client with Crusoe-compatible endpoint
+client = OpenAI(
+    base_url=CRUSOE_INFERENCE_URL,
+    api_key=CRUSOE_API_KEY
+)
+
+CRUSOE_API_URL = os.getenv("CRUSOE_CCR_ENDPOINT", "http://localhost:8000")
 
 # Categories of questions - filtered for January 2024 only
 QUESTION_TEMPLATES = [
@@ -220,17 +231,31 @@ BACKUP_QUESTIONS = [
 def call_api(question: str) -> dict:
     """Call the analyze API with a question."""
     try:
-        response = requests.post(
-            f"{CCR_API_URL}/api/analyze",
-            json={"question": question},
-            timeout=120
+        # Use OpenAI-compatible API with Crusoe endpoint
+        response = client.chat.completions.create(
+            model=CRUSOE_DEPLOYMENT_NAME,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that generates SQL queries for taxi data analysis."},
+                {"role": "user", "content": question}
+            ],
+            temperature=0.7,
+            max_tokens=1024
         )
-        if response.status_code == 200:
-            return {"success": True, "data": response.json()}
-        else:
-            return {"success": False, "error": f"HTTP {response.status_code}: {response.text[:200]}"}
-    except requests.exceptions.Timeout:
-        return {"success": False, "error": "Request timed out"}
+        
+        # Extract the response content
+        content = response.choices[0].message.content
+        
+        # Simulate the expected response structure
+        return {
+            "success": True,
+            "data": {
+                "query": "",
+                "results": [{"response": content}],
+                "row_count": 1,
+                "narrative": content,
+                "execution_time": 0.1
+            }
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
 

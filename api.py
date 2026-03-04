@@ -21,6 +21,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Import required SDKs for Crusoe migration
+import boto3
+import requests
+
 # Global engine instance
 engine: Optional[FinancialAnalysisEngine] = None
 
@@ -194,7 +198,27 @@ async def get_data_status():
         
         # List all parquet files (local path only; abfss paths can't be listed via glob)
         parquet_files = []
-        if data_path_str.startswith("abfss://"):
+        if data_path_str.startswith("s3a://"):
+            # S3-compatible storage: use boto3 to list objects
+            try:
+                s3 = boto3.client(
+                    "s3",
+                    endpoint_url=engine.settings.crusoe_s3_endpoint,
+                    aws_access_key_id=engine.settings.crusoe_s3_access_key,
+                    aws_secret_access_key=engine.settings.crusoe_s3_secret_key
+                )
+                bucket = engine.settings.crusoe_s3_bucket
+                prefix = data_path_str.replace("s3a://", "").rstrip("/")
+                response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/")
+                if "Contents" in response:
+                    parquet_files = [obj["Key"].split("/")[-1] for obj in response["Contents"] if obj["Key"].endswith(".parquet")]
+                else:
+                    parquet_files = ["(No files found in S3 bucket)"]
+            except Exception as e:
+                parquet_files = [f"(S3 listing error: {str(e)})"]
+        elif data_path_str.startswith("abfss://"):
+            # TODO: Crusoe has no managed equivalent for Azure Blob Storage.
+            #       Options: self-host MinIO or use third-party SaaS.
             parquet_files = ["(Azure Storage - file listing not available)"]
         elif data_path.exists():
             for pattern in ["yellow_tripdata_*.parquet", "green_tripdata_*.parquet", 
@@ -231,7 +255,7 @@ async def get_data_status():
             "data_loaded": engine._data_loaded,
             "data_path": data_path_str,
             "files": {
-                "total_parquet_files": len(parquet_files) if parquet_files and not parquet_files[0].startswith("(") else 0,
+                "total_parquet_files": len(parquet_files) if parquet_files and not parquet_files[0].startswith("(") and not parquet_files[0].startswith("S3") else 0,
                 "parquet_files": parquet_files,
                 "files_by_type": {
                     "yellow": [f for f in parquet_files if f.startswith("yellow")],
@@ -550,4 +574,3 @@ if __name__ == "__main__":
         reload=True,
         log_level=settings.log_level.lower()
     )
-

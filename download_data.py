@@ -36,9 +36,9 @@ Usage Examples:
 
 Upload to Azure Storage (for Synapse Spark):
     Set these environment variables before using --upload:
-    - CRUSOE_STORAGE_ACCOUNT (or CRUSOE_STORAGE_ACCOUNT)
-    - CRUSOE_STORAGE_ACCESS_KEY
-    - CRUSOE_STORAGE_BUCKET (or CRUSOE_STORAGE_BUCKET, default: data)
+    - CLOUD_STORAGE_ACCOUNT (or CLOUD_STORAGE_ACCOUNT)
+    - CLOUD_STORAGE_ACCESS_KEY
+    - CLOUD_STORAGE_BUCKET (or CLOUD_STORAGE_BUCKET, default: data)
     
     After upload, set DATA_PATH to: abfss://<container>@<account>.dfs.core.windows.net/<storage-path>/
 
@@ -69,6 +69,7 @@ import logging
 import argparse
 import time
 from typing import Optional, Tuple
+import boto3
 import botocore.exceptions
 
 # Configure logging
@@ -181,58 +182,53 @@ def download_parquet_data(service_types=None, years=None, months=None, skip_exis
 
 def get_storage_config() -> Optional[Tuple[str, str, str]]:
     """
-    Get Azure Storage configuration from environment variables.
-    Returns (account_name, account_key, container) or None if not configured.
+    Get S3-compatible Storage configuration from environment variables.
+    Returns (access_key, secret_key, bucket) or None if not configured.
     """
-    account_name = os.environ.get("CRUSOE_STORAGE_ACCOUNT") or os.environ.get("CRUSOE_STORAGE_ACCOUNT")
-    account_key = os.environ.get("CRUSOE_STORAGE_ACCESS_KEY")
-    container = os.environ.get("CRUSOE_STORAGE_BUCKET") or os.environ.get("CRUSOE_STORAGE_BUCKET", "data")
+    access_key = os.environ.get("CLOUD_STORAGE_ACCESS_KEY")
+    secret_key = os.environ.get("CLOUD_STORAGE_SECRET_KEY")
+    bucket = os.environ.get("CLOUD_STORAGE_BUCKET") or os.environ.get("CLOUD_STORAGE_BUCKET", "data")
     
-    if account_name and account_key:
-        return (account_name, account_key, container)
+    if access_key and secret_key:
+        return (access_key, secret_key, bucket)
     return None
 
 
 def upload_file_to_storage(
     local_path: Path,
-    blob_path: str,
-    account_name: str,
-    account_key: str,
-    container_name: str,
+    s3_key: str,
+    access_key: str,
+    secret_key: str,
+    bucket_name: str,
     skip_existing: bool = True
 ) -> bool:
-    """Upload a single file to Azure Blob Storage (Data Lake Gen2 compatible)."""
+    """Upload a single file to Crusoe S3-compatible storage."""
     try:
-        import boto3
-        
         s3 = boto3.client(
             's3',
-            endpoint_url=os.environ.get('S3_ENDPOINT', 'https://storage.api.crusoecloud.com'),
-            aws_access_key_id=account_key,
-            aws_secret_access_key=account_key
+            endpoint_url='https://storage.api.crusoecloud.com',
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key
         )
         
         if skip_existing:
             try:
-                s3.head_object(Bucket=container_name, Key=blob_path)
-                logger.info(f"⏭️  Skipping upload (exists in storage): {blob_path}")
+                s3.head_object(Bucket=bucket_name, Key=s3_key)
+                logger.info(f"⏭️  Skipping upload (exists in storage): {s3_key}")
                 return True
             except botocore.exceptions.ClientError as e:
                 if e.response['Error']['Code'] == '404':
                     pass  # File doesn't exist, continue with upload
                 else:
-                    logger.error(f"❌ Failed to check existence of {blob_path}: {e}")
+                    logger.error(f"❌ Failed to check existence of {s3_key}: {e}")
                     return False
         
         with open(local_path, "rb") as data:
-            s3.upload_fileobj(data, container_name, blob_path)
+            s3.upload_fileobj(data, bucket_name, s3_key)
         
         file_size_mb = local_path.stat().st_size / (1024 * 1024)
-        logger.info(f"☁️  Uploaded {local_path.name} -> {blob_path} ({file_size_mb:.1f} MB)")
+        logger.info(f"☁️  Uploaded {local_path.name} -> {s3_key} ({file_size_mb:.1f} MB)")
         return True
-    except ImportError:
-        logger.error("boto3 package required for upload. Install with: pip install boto3")
-        return False
     except Exception as e:
         logger.error(f"❌ Failed to upload {local_path.name}: {e}")
         return False
@@ -241,20 +237,20 @@ def upload_file_to_storage(
 def upload_to_storage(
     data_dir: Path,
     storage_path: str,
-    account_name: str,
-    account_key: str,
-    container_name: str,
+    access_key: str,
+    secret_key: str,
+    bucket_name: str,
     skip_existing: bool = True
 ) -> Tuple[int, int]:
     """
-    Upload all parquet files and taxi_zone_lookup.csv from data_dir to Azure Storage.
+    Upload all parquet files and taxi_zone_lookup.csv from data_dir to Crusoe S3-compatible storage.
     
     Args:
         data_dir: Local directory containing downloaded files
-        storage_path: Path prefix within container (e.g. "taxi-data")
-        account_name: Azure Storage account name
-        account_key: Azure Storage account key
-        container_name: Container (file system) name
+        storage_path: Path prefix within bucket (e.g. "taxi-data")
+        access_key: S3 access key
+        secret_key: S3 secret key
+        bucket_name: Bucket name
         skip_existing: Skip files that already exist in storage
         
     Returns:
@@ -276,17 +272,17 @@ def upload_to_storage(
     
     for pattern in parquet_patterns:
         for filepath in data_dir.glob(pattern):
-            blob_path = f"{prefix}/{filepath.name}" if prefix else filepath.name
+            s3_key = f"{prefix}/{filepath.name}" if prefix else filepath.name
             total_count += 1
-            if upload_file_to_storage(filepath, blob_path, account_name, account_key, container_name, skip_existing):
+            if upload_file_to_storage(filepath, s3_key, access_key, secret_key, bucket_name, skip_existing):
                 success_count += 1
     
     # Taxi zones CSV
     zones_file = data_dir / "taxi_zone_lookup.csv"
     if zones_file.exists():
-        blob_path = f"{prefix}/taxi_zone_lookup.csv" if prefix else "taxi_zone_lookup.csv"
+        s3_key = f"{prefix}/taxi_zone_lookup.csv" if prefix else "taxi_zone_lookup.csv"
         total_count += 1
-        if upload_file_to_storage(zones_file, blob_path, account_name, account_key, container_name, skip_existing):
+        if upload_file_to_storage(zones_file, s3_key, access_key, secret_key, bucket_name, skip_existing):
             success_count += 1
     
     return success_count, total_count
@@ -331,7 +327,7 @@ def download_taxi_zones():
 
 def main():
     """Main download function for Azure deployment"""
-    parser = argparse.ArgumentParser(description="Download NYC Taxi Data (2023-2025) - Azure Deployment")
+    parser = argparse.ArgumentParser(description="Download NYC Taxi Data (2023-2025) - Crusoe Deployment")
     parser.add_argument("--years", nargs="+", type=int, default=YEARS, 
                        help="Years to download (default: 2023 2024 2025)")
     parser.add_argument("--service-types", nargs="+", 
@@ -364,7 +360,7 @@ def main():
     
     # Upload-only mode: skip download, just upload existing src_data to storage
     if args.upload_only:
-        logger.info("🚕 Upload-only mode - uploading existing src_data to Azure Storage")
+        logger.info("🚕 Upload-only mode - uploading existing src_data to Crusoe S3-compatible storage")
         logger.info("=" * 70)
         data_dir = Path("src_data")
         if not data_dir.exists():
@@ -372,23 +368,23 @@ def main():
             exit(1)
         storage_config = get_storage_config()
         if not storage_config:
-            logger.error("Storage config required. Set CRUSOE_STORAGE_ACCOUNT, CRUSOE_STORAGE_ACCESS_KEY")
+            logger.error("Storage config required. Set CLOUD_STORAGE_ACCESS_KEY, CLOUD_STORAGE_SECRET_KEY")
             exit(1)
-        account_name, account_key, container_name = storage_config
+        access_key, secret_key, bucket_name = storage_config
         logger.info(f"  Source: {data_dir.absolute()}")
-        logger.info(f"  Target: {container_name}@{account_name}")
+        logger.info(f"  Target: s3://{bucket_name}")
         logger.info("=" * 70)
         upload_success, upload_total = upload_to_storage(
             data_dir=data_dir,
             storage_path=args.storage_path,
-            account_name=account_name,
-            account_key=account_key,
-            container_name=container_name,
+            access_key=access_key,
+            secret_key=secret_key,
+            bucket_name=bucket_name,
             skip_existing=args.skip_existing_in_storage
         )
-        logger.info(f"\n✅ Uploaded {upload_success}/{upload_total} files to Azure Storage")
+        logger.info(f"\n✅ Uploaded {upload_success}/{upload_total} files to Crusoe S3-compatible storage")
         if upload_success > 0:
-            data_path = f"abfss://{container_name}@{account_name}.dfs.core.windows.net/{args.storage_path.strip('/')}/"
+            data_path = f"s3a://{bucket_name}/{args.storage_path.strip('/')}/"
             logger.info(f"   DATA_PATH: {data_path}")
         exit(0 if upload_success > 0 else 1)
     
@@ -415,28 +411,28 @@ def main():
     logger.info("\n🗺️  Downloading taxi zones...")
     zones_success = download_taxi_zones()
     
-    # Upload to Azure Storage if requested
+    # Upload to Crusoe S3-compatible storage if requested
     upload_success = None
     if args.upload:
-        logger.info("\n☁️  Uploading to Azure Storage (for Synapse Spark pool)...")
+        logger.info("\n☁️  Uploading to Crusoe S3-compatible storage...")
         storage_config = get_storage_config()
         if storage_config:
-            account_name, account_key, container_name = storage_config
+            access_key, secret_key, bucket_name = storage_config
             data_dir = Path("src_data")
             upload_success, upload_total = upload_to_storage(
                 data_dir=data_dir,
                 storage_path=args.storage_path,
-                account_name=account_name,
-                account_key=account_key,
-                container_name=container_name,
+                access_key=access_key,
+                secret_key=secret_key,
+                bucket_name=bucket_name,
                 skip_existing=args.skip_existing_in_storage
             )
             logger.info(f"  Uploaded: {upload_success}/{upload_total} files")
             if upload_success > 0:
-                data_path = f"abfss://{container_name}@{account_name}.dfs.core.windows.net/{args.storage_path.strip('/')}/"
+                data_path = f"s3a://{bucket_name}/{args.storage_path.strip('/')}/"
                 logger.info(f"  DATA_PATH for API: {data_path}")
         else:
-            logger.warning("⚠️  Upload skipped: Set CRUSOE_STORAGE_ACCOUNT, CRUSOE_STORAGE_ACCESS_KEY (and optionally CRUSOE_STORAGE_BUCKET)")
+            logger.warning("⚠️  Upload skipped: Set CLOUD_STORAGE_ACCESS_KEY, CLOUD_STORAGE_SECRET_KEY (and optionally CLOUD_STORAGE_BUCKET)")
     
     # Summary
     logger.info("\n" + "=" * 60)
@@ -451,7 +447,7 @@ def main():
     if success == total and zones_success:
         logger.info("\n🎉 All data downloaded successfully!")
         if args.upload and upload_success and upload_success > 0:
-            logger.info("☁️  Data uploaded to Azure Storage - Spark pool can now access it")
+            logger.info("☁️  Data uploaded to Crusoe S3-compatible storage - Spark can now access it")
             logger.info("   Set DATA_PATH in your API environment to the path shown above")
         else:
             logger.info("☁️  Data is now available in your local src_data/ directory")

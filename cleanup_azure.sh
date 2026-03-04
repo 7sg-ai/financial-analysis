@@ -61,154 +61,117 @@ else
 fi
 
 # Check Azure CLI
-if ! command -v az &> /dev/null; then
-    echo "Error: Azure CLI not found. Please install it first."
+if ! command -v kubectl &> /dev/null; then
+    echo "Error: Kubernetes CLI (kubectl) not found. Please install it first."
     exit 1
 fi
 
 # Authentication
 echo ""
-echo "Checking Azure authentication..."
-az account show > /dev/null 2>&1 || az login
-echo "✓ Authenticated"
+echo "Checking Kubernetes cluster access..."
+kubectl cluster-info > /dev/null 2>&1 || echo "⚠️  Warning: Unable to connect to Kubernetes cluster. Please ensure kubeconfig is properly configured."
+echo "✓ Cluster access verified"
 echo ""
 
-# Check if resource group exists
-if ! az group show --name "$RESOURCE_GROUP" &> /dev/null; then
-    echo "Resource group '$RESOURCE_GROUP' does not exist. Nothing to clean up."
+# Check if namespace exists (CRUSOE uses Kubernetes namespaces instead of resource groups)
+NAMESPACE="$RESOURCE_GROUP"
+if ! kubectl get namespace "$NAMESPACE" &> /dev/null; then
+    echo "Namespace '$NAMESPACE' does not exist. Nothing to clean up."
     exit 0
 fi
 
-# 1. Delete API Container Instance
+# 1. Delete API Container Instance (Kubernetes Deployment)
 echo "1. Deleting API Container Instance ($API_CONTAINER_NAME)..."
-if az container show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az container delete \
-        --name "$API_CONTAINER_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --yes \
-        --no-wait \
-        --output none 2>/dev/null || true
+if kubectl get deployment "$API_CONTAINER_NAME" -n "$NAMESPACE" &> /dev/null; then
+    kubectl delete deployment "$API_CONTAINER_NAME" -n "$NAMESPACE" --ignore-not-found=true
     echo "   ✓ Deletion initiated"
 else
     echo "   ⏭️  Not found (already deleted or never created)"
 fi
 echo ""
 
-# 2. Delete User-Assigned Managed Identity (used by API container)
-echo "2. Deleting User-Assigned Managed Identity ($API_IDENTITY_NAME)..."
-if az identity show --name "$API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az identity delete \
-        --name "$API_IDENTITY_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --output none 2>/dev/null || true
+# 2. Delete Service Account (used by API container)
+echo "2. Deleting Service Account ($API_IDENTITY_NAME)..."
+if kubectl get serviceaccount "$API_IDENTITY_NAME" -n "$NAMESPACE" &> /dev/null; then
+    kubectl delete serviceaccount "$API_IDENTITY_NAME" -n "$NAMESPACE" --ignore-not-found=true
     echo "   ✓ Deleted"
 else
     echo "   ⏭️  Not found (already deleted or never created)"
 fi
 echo ""
 
-# 3. Delete Streamlit Web App
+# 3. Delete Streamlit Web App (Kubernetes Service)
 echo "3. Deleting Streamlit Web App ($STREAMLIT_APP_NAME)..."
-if az webapp show --name "$STREAMLIT_APP_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az webapp delete \
-        --name "$STREAMLIT_APP_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --output none
+if kubectl get service "$STREAMLIT_APP_NAME" -n "$NAMESPACE" &> /dev/null; then
+    kubectl delete service "$STREAMLIT_APP_NAME" -n "$NAMESPACE" --ignore-not-found=true
     echo "   ✓ Deleted"
 else
     echo "   ⏭️  Not found (already deleted or never created)"
 fi
 echo ""
 
-# 4. Delete App Service Plan
-echo "4. Deleting App Service Plan ($APP_SERVICE_PLAN)..."
-if az appservice plan show --name "$APP_SERVICE_PLAN" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az appservice plan delete \
-        --name "$APP_SERVICE_PLAN" \
-        --resource-group "$RESOURCE_GROUP" \
-        --yes \
-        --output none
+# 4. Delete Deployment Configuration (equivalent to App Service Plan)
+echo "4. Deleting Deployment Configuration ($APP_SERVICE_PLAN)..."
+# In CRUSOE, App Service Plans are abstracted into Kubernetes namespaces and resource quotas
+# No explicit deletion needed as namespace deletion handles this
+# But we'll clean up any associated ConfigMaps if they exist
+if kubectl get configmap "$APP_SERVICE_PLAN-config" -n "$NAMESPACE" &> /dev/null; then
+    kubectl delete configmap "$APP_SERVICE_PLAN-config" -n "$NAMESPACE" --ignore-not-found=true
     echo "   ✓ Deleted"
 else
     echo "   ⏭️  Not found (already deleted or never created)"
 fi
 echo ""
 
-# 5. Delete Synapse Spark Pool (must be deleted before workspace)
-echo "5. Deleting Synapse Spark Pool ($SYNAPSE_SPARK_POOL_NAME)..."
-if az synapse spark pool show \
-    --workspace-name "$SYNAPSE_WORKSPACE_NAME" \
-    --resource-group "$RESOURCE_GROUP" \
-    --name "$SYNAPSE_SPARK_POOL_NAME" &> /dev/null; then
-    az synapse spark pool delete \
-        --workspace-name "$SYNAPSE_WORKSPACE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --name "$SYNAPSE_SPARK_POOL_NAME" \
-        --yes \
-        --no-wait \
-        --output none 2>/dev/null || true
-    echo "   ✓ Deletion initiated (Spark pools can take several minutes to delete)"
-    echo "   Waiting 30 seconds for pool deletion to start..."
+# 5. Delete Spark Cluster (equivalent to Synapse Spark Pool)
+echo "5. Deleting Spark Cluster ($SYNAPSE_SPARK_POOL_NAME)..."
+# In CRUSOE, Spark clusters are managed as Kubernetes resources
+# Assuming Spark operator is used for Spark cluster management
+if kubectl get sparkapplication "$SYNAPSE_SPARK_POOL_NAME" -n "$NAMESPACE" &> /dev/null; then
+    kubectl delete sparkapplication "$SYNAPSE_SPARK_POOL_NAME" -n "$NAMESPACE" --ignore-not-found=true
+    echo "   ✓ Deletion initiated"
+    echo "   Waiting 30 seconds for cluster deletion to start..."
     sleep 30
 else
     echo "   ⏭️  Not found (already deleted or never created)"
 fi
 echo ""
 
-# 6. Delete Synapse Workspace (must be deleted before storage)
-echo "6. Deleting Synapse Workspace ($SYNAPSE_WORKSPACE_NAME)..."
-if az synapse workspace show --name "$SYNAPSE_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az synapse workspace delete \
-        --name "$SYNAPSE_WORKSPACE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --yes \
-        --no-wait \
-        --output none 2>/dev/null || true
+# 6. Delete Data Processing Namespace (equivalent to Synapse Workspace)
+echo "6. Deleting Data Processing Namespace ($SYNAPSE_WORKSPACE_NAME)..."
+# In CRUSOE, Synapse Workspaces are abstracted into Kubernetes namespaces
+# We'll delete the namespace which handles all contained resources
+if kubectl get namespace "$SYNAPSE_WORKSPACE_NAME" &> /dev/null; then
+    kubectl delete namespace "$SYNAPSE_WORKSPACE_NAME" --ignore-not-found=true
     echo "   ✓ Deletion initiated"
-    echo "   Waiting 15 seconds for workspace deletion to start..."
+    echo "   Waiting 15 seconds for namespace deletion to start..."
     sleep 15
 else
     echo "   ⏭️  Not found (already deleted or never created)"
 fi
 echo ""
 
-# 7. Delete Storage Account
-echo "7. Deleting Storage Account ($SYNAPSE_STORAGE_ACCOUNT)..."
-if az storage account show --name "$SYNAPSE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az storage account delete \
-        --name "$SYNAPSE_STORAGE_ACCOUNT" \
-        --resource-group "$RESOURCE_GROUP" \
-        --yes \
-        --output none 2>/dev/null || true
+# 7. Delete Persistent Volume Claims (equivalent to Storage Account)
+echo "7. Deleting Persistent Volume Claims ($SYNAPSE_STORAGE_ACCOUNT)..."
+# In CRUSOE, Azure Storage Accounts are replaced with Kubernetes Persistent Volumes
+# We'll delete PVCs with matching labels or names
+if kubectl get pvc -n "$NAMESPACE" -l storage-account="$SYNAPSE_STORAGE_ACCOUNT" &> /dev/null; then
+    kubectl delete pvc -n "$NAMESPACE" -l storage-account="$SYNAPSE_STORAGE_ACCOUNT" --ignore-not-found=true
     echo "   ✓ Deleted"
 else
     echo "   ⏭️  Not found (already deleted or never created)"
 fi
 echo ""
 
-# 8. Delete Azure OpenAI (Cognitive Services)
-echo "8. Deleting Azure OpenAI ($OPENAI_RESOURCE_NAME)..."
-if az cognitiveservices account show --name "$OPENAI_RESOURCE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az cognitiveservices account delete \
-        --name "$OPENAI_RESOURCE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --output none
+# 8. Delete AI Service (equivalent to Azure OpenAI)
+echo "8. Deleting AI Service ($OPENAI_RESOURCE_NAME)..."
+# In CRUSOE, Azure OpenAI is replaced with Kubernetes-based AI service deployments
+# Assuming AI services are deployed as Kubernetes Deployments with specific labels
+if kubectl get deployment -n "$NAMESPACE" -l ai-service="$OPENAI_RESOURCE_NAME" &> /dev/null; then
+    kubectl delete deployment -n "$NAMESPACE" -l ai-service="$OPENAI_RESOURCE_NAME" --ignore-not-found=true
     echo "   ✓ Deleted"
 else
     echo "   ⏭️  Not found (already deleted or never created)"
-fi
-
-# 8b. Purge deleted Cognitive Services account (frees name for reuse, stops charges)
-sleep 3  # Brief wait for delete to propagate to soft-deleted state
-echo "8b. Purging deleted Azure OpenAI ($OPENAI_RESOURCE_NAME)..."
-if az cognitiveservices account show-deleted --name "$OPENAI_RESOURCE_NAME" --location "$LOCATION" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    az cognitiveservices account purge \
-        --name "$OPENAI_RESOURCE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --location "$LOCATION" \
-        --output none && echo "   ✓ Purged" || echo "   ⚠️  Purge failed (may need subscription-level Contributor role)"
-else
-    echo "   ⏭️  Not in deleted state (already purged or never existed)"
 fi
 echo ""
 

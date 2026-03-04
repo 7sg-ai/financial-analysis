@@ -5,11 +5,11 @@
 set -e
 
 # Configuration
-RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-financial-analysis}"
-OPENAI_RESOURCE_NAME="${AZURE_OPENAI_RESOURCE_NAME:-financial-analysis-openai}"
+RESOURCE_GROUP="${CRUSOE_RESOURCE_GROUP:-financial-analysis-rg}"
+OPENAI_RESOURCE_NAME="${CRUSOE_OPENAI_RESOURCE_NAME:-financial-analysis-openai}"
 
 echo "=================================="
-echo "Azure OpenAI Endpoint & Deployment Fixer"
+echo "CRUSOE OpenAI Endpoint & Deployment Fixer"
 echo "=================================="
 echo ""
 echo "This script will help you:"
@@ -19,28 +19,28 @@ echo "  3. Create a deployment if needed"
 echo ""
 
 # Check if Azure CLI is installed
-if ! command -v az &> /dev/null; then
-    echo "✗ Azure CLI is not installed"
+if ! command -v crusoe &> /dev/null; then
+    echo "✗ CRUSOE CLI is not installed"
     exit 1
 fi
 
 # Check if logged in
-if ! az account show &> /dev/null; then
-    echo "⚠️  Not logged in to Azure. Logging in..."
-    az login
+if ! crusoe account show &> /dev/null; then
+    echo "⚠️  Not logged in to CRUSOE. Logging in..."
+    crusoe login
 fi
 
-echo "Step 1: Finding Azure OpenAI resource..."
-if ! az cognitiveservices account show --name "$OPENAI_RESOURCE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-    echo "✗ Azure OpenAI resource '$OPENAI_RESOURCE_NAME' not found"
+echo "Step 1: Finding CRUSOE OpenAI resource..."
+if ! crusoe ai model show --name "$OPENAI_RESOURCE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    echo "✗ CRUSOE OpenAI resource '$OPENAI_RESOURCE_NAME' not found"
     echo ""
-    echo "Available Cognitive Services resources:"
-    az cognitiveservices account list --resource-group "$RESOURCE_GROUP" --query "[].{Name:name,Kind:kind,Endpoint:properties.endpoint}" -o table 2>/dev/null || echo "None found"
+    echo "Available AI resources:"
+    crusoe ai model list --resource-group "$RESOURCE_GROUP" --query "[].{Name:name,Kind:kind,Endpoint:properties.endpoint}" -o table 2>/dev/null || echo "None found"
     exit 1
 fi
 
 # Get endpoint
-ENDPOINT=$(az cognitiveservices account show \
+ENDPOINT=$(crusoe ai model show \
     --name "$OPENAI_RESOURCE_NAME" \
     --resource-group "$RESOURCE_GROUP" \
     --query properties.endpoint -o tsv 2>/dev/null)
@@ -54,23 +54,23 @@ echo "✓ Found endpoint: $ENDPOINT"
 echo ""
 
 # Check if endpoint is OpenAI-specific or generic Cognitive Services
-if [[ "$ENDPOINT" == *".openai.azure.com"* ]]; then
+if [[ "$ENDPOINT" == *".openai.crusoe.ai"* ]]; then
     echo "✓ Endpoint format is correct (OpenAI-specific)"
     OPENAI_ENDPOINT="$ENDPOINT"
-elif [[ "$ENDPOINT" == *"api.cognitive.microsoft.com"* ]]; then
-    echo "⚠️  Warning: Endpoint is generic Cognitive Services endpoint"
-    echo "   Azure OpenAI requires a resource-specific endpoint"
+elif [[ "$ENDPOINT" == *"api.crusoe.ai"* ]]; then
+    echo "⚠️  Warning: Endpoint is generic CRUSOE AI endpoint"
+    echo "   CRUSOE OpenAI requires a resource-specific endpoint"
     echo ""
-    echo "   The endpoint should be in format: https://your-resource-name.openai.azure.com"
+    echo "   The endpoint should be in format: https://your-resource-name.openai.crusoe.ai"
     echo "   Current endpoint: $ENDPOINT"
     echo ""
-    echo "   Please check your Azure OpenAI resource in the Azure Portal:"
-    echo "   https://portal.azure.com/#view/HubsExtension/BrowseResource/resourceType/Microsoft.CognitiveServices%2Faccounts"
+    echo "   Please check your CRUSOE OpenAI resource in the CRUSOE Portal:"
+    echo "   https://portal.crusoe.ai/resources"
     echo ""
-    read -p "Do you have the correct OpenAI endpoint? (y/N): " -n 1 -r
+    read -p "Do you have the correct CRUSOE OpenAI endpoint? (y/N): " -n 1 -r
     echo ""
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        read -p "Enter the correct OpenAI endpoint (e.g., https://your-resource.openai.azure.com): " OPENAI_ENDPOINT
+        read -p "Enter the correct CRUSOE OpenAI endpoint (e.g., https://your-resource.openai.crusoe.ai): " OPENAI_ENDPOINT
     else
         echo "Please find your Azure OpenAI resource endpoint and run this script again"
         exit 1
@@ -88,7 +88,7 @@ echo "Step 2: Checking available deployments..."
 echo ""
 
 # Get API key
-API_KEY=$(az cognitiveservices account keys list \
+API_KEY=$(crusoe ai model keys list \
     --name "$OPENAI_RESOURCE_NAME" \
     --resource-group "$RESOURCE_GROUP" \
     --query key1 -o tsv 2>/dev/null)
@@ -104,7 +104,7 @@ TEST_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
     -H "api-key: $API_KEY" \
     -H "Content-Type: application/json" \
     -d '{"messages":[{"role":"user","content":"test"}],"max_completion_tokens":5}' \
-    "${OPENAI_ENDPOINT}/openai/deployments/gpt-5.2-chat/chat/completions?api-version=2024-12-01-preview" 2>/dev/null)
+    "${OPENAI_ENDPOINT}/openai/deployments/gpt-5.2-chat/chat/completions?api-version=2024-12-01" 2>/dev/null)
 
 HTTP_CODE=$(echo "$TEST_RESPONSE" | tail -n1)
 TEST_BODY=$(echo "$TEST_RESPONSE" | sed '$d')
@@ -133,7 +133,7 @@ if [ "$DEPLOYMENT_EXISTS" = false ]; then
     echo "Attempting to list deployments (may not be supported for this endpoint format)..."
     DEPLOYMENTS_RESPONSE=$(curl -s -w "\n%{http_code}" \
         -H "api-key: $API_KEY" \
-        "${OPENAI_ENDPOINT}/openai/deployments?api-version=2024-12-01-preview" 2>/dev/null)
+        "${OPENAI_ENDPOINT}/openai/deployments?api-version=2024-12-01" 2>/dev/null)
     
     LIST_HTTP_CODE=$(echo "$DEPLOYMENTS_RESPONSE" | tail -n1)
     DEPLOYMENTS_BODY=$(echo "$DEPLOYMENTS_RESPONSE" | sed '$d')
@@ -169,14 +169,14 @@ if [ "$DEPLOYMENT_EXISTS" = false ]; then
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo ""
         echo "Creating GPT-5.2-chat deployment (this may take several minutes)..."
-        az cognitiveservices account deployment create \
+        crusoe ai model deployment create \
             --name "$OPENAI_RESOURCE_NAME" \
             --resource-group "$RESOURCE_GROUP" \
             --deployment-name "gpt-5.2-chat" \
             --model-name "gpt-5.2-chat" \
             --model-format "OpenAI" \
-            --sku-capacity 10 \
-            --sku-name "Standard" 2>&1 | tee /tmp/deployment-create.log
+            --capacity 10 \
+            --tier "standard" 2>&1 | tee /tmp/deployment-create.log
         
         if [ $? -eq 0 ]; then
             echo ""
@@ -209,7 +209,7 @@ UPDATE_CONTAINER=false
 UPDATE_STREAMLIT=false
 
 # Check if API container exists
-if az container show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+if crusoe container show --name "$API_CONTAINER_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
     echo "✓ Found API container: $API_CONTAINER_NAME"
     read -p "Update API container with new endpoint and deployment settings? (y/N): " -n 1 -r
     echo ""

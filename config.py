@@ -23,9 +23,9 @@ class Settings(BaseSettings):
     crusoe_resource_group: str = Field(..., env="CRUSOE_RESOURCE_GROUP")
     
     # Crusoe Storage Configuration
-    crusoe_storage_account: Optional[str] = Field(default=None, env="CRUSOE_STORAGE_ACCOUNT")
-    crusoe_storage_access_key: Optional[str] = Field(default=None, env="CRUSOE_STORAGE_ACCESS_KEY")
-    crusoe_storage_bucket: Optional[str] = Field(default=None, env="CRUSOE_STORAGE_BUCKET")
+    cloud_storage_account: Optional[str] = Field(default=None, env="CLOUD_STORAGE_ACCOUNT")
+    cloud_storage_access_key: Optional[str] = Field(default=None, env="CLOUD_STORAGE_ACCESS_KEY")
+    cloud_storage_bucket: Optional[str] = Field(default=None, env="CLOUD_STORAGE_BUCKET")
     
     # Crusoe S3 Configuration
     crusoe_s3_endpoint: Optional[str] = Field(default=None, env="CRUSOE_S3_ENDPOINT")

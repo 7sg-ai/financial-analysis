@@ -120,7 +120,7 @@ fi
 echo ""
 
 # Check CRUSOE CLI
-if ! command -v az &> /dev/null; then
+if ! command -v crusoe &> /dev/null; then
     echo "Error: CRUSOE CLI not found. Please install it first."
     echo ""
     echo "Installation: https://docs.crusoe.ai/cli/install"
@@ -232,9 +232,9 @@ fi
 # Create CRUSOE Storage Account for Synapse (if needed)
 echo ""
 echo "Checking CRUSOE Storage Account for Synapse..."
-if ! az storage account show --name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+if ! crusoe storage account show --name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
     echo "Creating storage account for Synapse..."
-    az storage account create \
+    crusoe storage account create \
         --name "$CRUSOE_STORAGE_ACCOUNT" \
         --resource-group "$RESOURCE_GROUP" \
         --location "$LOCATION" \
@@ -245,12 +245,12 @@ if ! az storage account show --name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "
     echo "✓ Storage account created"
     
     # Create file system (container) for data
-    STORAGE_KEY=$(az storage account keys list \
+    STORAGE_KEY=$(crusoe storage account keys list \
         --account-name "$CRUSOE_STORAGE_ACCOUNT" \
         --resource-group "$RESOURCE_GROUP" \
         --query "[0].value" -o tsv)
     
-    az storage container create \
+    crusoe storage container create \
         --name "$CRUSOE_FILE_SYSTEM" \
         --account-name "$CRUSOE_STORAGE_ACCOUNT" \
         --account-key "$STORAGE_KEY" \
@@ -263,11 +263,11 @@ fi
 # Create CRUSOE Spark Analytics workspace if it doesn't exist
 echo ""
 echo "Checking CRUSOE Spark Analytics workspace..."
-if ! az synapse workspace show --name "$CRUSOE_SPARK_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+if ! crusoe synapse workspace show --name "$CRUSOE_SPARK_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
     echo "Creating CRUSOE Spark Analytics workspace..."
     
     # Get storage account details
-    STORAGE_ACCOUNT_ID=$(az storage account show \
+    STORAGE_ACCOUNT_ID=$(crusoe storage account show \
         --name "$CRUSOE_STORAGE_ACCOUNT" \
         --resource-group "$RESOURCE_GROUP" \
         --query id -o tsv)
@@ -280,7 +280,7 @@ if ! az synapse workspace show --name "$CRUSOE_SPARK_WORKSPACE_NAME" --resource-
     # Create workspace without repository configuration
     # Note: Repository configuration is optional and not needed for this deployment
     # Using --only-show-errors to suppress repository-related warnings
-    az synapse workspace create \
+    crusoe synapse workspace create \
         --name "$CRUSOE_SPARK_WORKSPACE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --storage-account "$CRUSOE_STORAGE_ACCOUNT" \
@@ -306,12 +306,12 @@ fi
 # Create Synapse Spark pool if it doesn't exist
 echo ""
 echo "Checking Synapse Spark pool..."
-if ! az synapse spark pool show \
+if ! crusoe synapse spark pool show \
     --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" \
     --resource-group "$RESOURCE_GROUP" \
     --name "$CRUSOE_SPARK_POOL_NAME" &> /dev/null; then
     echo "Creating Synapse Spark pool..."
-    az synapse spark pool create \
+    crusoe synapse spark pool create \
         --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --name "$CRUSOE_SPARK_POOL_NAME" \
@@ -330,7 +330,7 @@ else
     echo "✓ Spark pool exists"
     # Ensure autoscale (3–10 nodes) and dynamic executor allocation are enabled
     echo "Ensuring pool autoscale and dynamic executor allocation..."
-    if az synapse spark pool update \
+    if crusoe synapse spark pool update \
         --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" \
         --resource-group "$RESOURCE_GROUP" \
         --name "$CRUSOE_SPARK_POOL_NAME" \
@@ -350,9 +350,9 @@ fi
 
 # Create container registry if it doesn't exist (needed for all options)
 echo "Checking container registry..."
-if ! az acr show --name "$CONTAINER_REGISTRY" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+if ! crusoe acr show --name "$CONTAINER_REGISTRY" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
     echo "Creating container registry..."
-    az acr create \
+    crusoe acr create \
         --name "$CONTAINER_REGISTRY" \
         --resource-group "$RESOURCE_GROUP" \
         --sku Basic \
@@ -375,7 +375,7 @@ assign_synapse_and_storage_rbac() {
     echo "Assigning Synapse and Storage RBAC (same as option 5)..."
     SYNAPSE_ASSIGNED=false
     # If identity already has Spark Cluster User, skip trying other roles
-    EXISTING_SYNAPSE=$(az synapse role assignment list --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --query "[?principalId=='$principal_id'].roleName" -o tsv 2>/dev/null | tr '\t' '\n')
+    EXISTING_SYNAPSE=$(crusoe synapse role assignment list --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --query "[?principalId=='$principal_id'].roleName" -o tsv 2>/dev/null | tr '\t' '\n')
     if echo "$EXISTING_SYNAPSE" | grep -qx "Spark Cluster User"; then
         echo "  ✓ Identity already has Spark Cluster User (skipping other role attempts)"
         SYNAPSE_ASSIGNED=true
@@ -384,7 +384,7 @@ assign_synapse_and_storage_rbac() {
         CRUSOE_SPARK_ROLES_TO_TRY=("$CRUSOE_SPARK_ROLE" "Spark Cluster User" "Synapse Contributor" "Synapse Compute Operator")
         for ROLE in "${CRUSOE_SPARK_ROLES_TO_TRY[@]}"; do
             [ -z "$ROLE" ] && continue
-            if az synapse role assignment create --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --role "$ROLE" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal 2>/dev/null; then
+            if crusoe synapse role assignment create --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --role "$ROLE" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal 2>/dev/null; then
                 echo "  ✓ Synapse role '$ROLE' assigned"
                 SYNAPSE_ASSIGNED=true
                 break
@@ -395,8 +395,8 @@ assign_synapse_and_storage_rbac() {
         echo "  ⚠️  Synapse role may already be assigned. If 403 useCompute persists, run option 5."
     fi
     echo "  Assigning Storage Blob Data Contributor..."
-    if az storage account show --name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-        if az role assignment create --role "Storage Blob Data Contributor" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal --scope "/subscriptions/$(crusoe account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Storage/storageAccounts/$CRUSOE_STORAGE_ACCOUNT" 2>/dev/null; then
+    if crusoe storage account show --name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        if crusoe role assignment create --role "Storage Blob Data Contributor" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal --scope "/subscriptions/$(crusoe account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Storage/storageAccounts/$CRUSOE_STORAGE_ACCOUNT" 2>/dev/null; then
             echo "  ✓ Storage Blob Data Contributor assigned"
         else
             echo "  ⚠️  May already be assigned."
@@ -414,14 +414,14 @@ if [ "$DEPLOYMENT_CHOICE" = "5" ]; then
 
     # Check 1: Synapse workspace exists
     echo "Checking prerequisites..."
-    if ! az synapse workspace show --name "$CRUSOE_SPARK_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    if ! crusoe synapse workspace show --name "$CRUSOE_SPARK_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
         echo "✗ Synapse workspace '$CRUSOE_SPARK_WORKSPACE_NAME' not found. Deploy with option 1 or 3 first."
         exit 1
     fi
     echo "  ✓ Synapse workspace exists: $CRUSOE_SPARK_WORKSPACE_NAME"
 
     # Check 2: Spark pool exists
-    if ! az synapse spark pool show --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" --name "$CRUSOE_SPARK_POOL_NAME" &> /dev/null; then
+    if ! crusoe synapse spark pool show --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --resource-group "$RESOURCE_GROUP" --name "$CRUSOE_SPARK_POOL_NAME" &> /dev/null; then
         echo "✗ Spark pool '$CRUSOE_SPARK_POOL_NAME' not found. Deploy with option 1 or 3 first to create the pool."
         exit 1
     fi
@@ -430,15 +430,15 @@ if [ "$DEPLOYMENT_CHOICE" = "5" ]; then
     # Check 3: Create or verify managed identity
     echo ""
     echo "Ensuring user-assigned managed identity exists..."
-    if ! az identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-        az identity create --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --output none
+    if ! crusoe identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        crusoe identity create --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --output none
         echo "  ✓ Created user-assigned identity: $CRUSOE_API_IDENTITY_NAME"
     else
         echo "  ✓ Using existing identity: $CRUSOE_API_IDENTITY_NAME"
     fi
 
-    API_IDENTITY_PRINCIPAL_ID=$(az identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query principalId -o tsv)
-    API_IDENTITY_CLIENT_ID=$(az identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query clientId -o tsv)
+    API_IDENTITY_PRINCIPAL_ID=$(crusoe identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query principalId -o tsv)
+    API_IDENTITY_CLIENT_ID=$(crusoe identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query clientId -o tsv)
     echo "  Principal ID: $API_IDENTITY_PRINCIPAL_ID"
     echo "  Client ID: $API_IDENTITY_CLIENT_ID"
     echo "  (If you see a 403 with a different principal ID, the container may be using a different identity.)"
@@ -446,7 +446,7 @@ if [ "$DEPLOYMENT_CHOICE" = "5" ]; then
 
     # Check 4: List existing Synapse role assignments for this identity
     echo "Current Synapse role assignments for this identity:"
-    EXISTING_ROLES=$(az synapse role assignment list --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --query "[?principalId=='$API_IDENTITY_PRINCIPAL_ID'].roleName" -o tsv 2>/dev/null || true)
+    EXISTING_ROLES=$(crusoe synapse role assignment list --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --query "[?principalId=='$API_IDENTITY_PRINCIPAL_ID'].roleName" -o tsv 2>/dev/null || true)
     if [ -n "$EXISTING_ROLES" ]; then
         echo "$EXISTING_ROLES" | tr '\t' '\n' | sed 's/^/  - /'
     else
@@ -457,7 +457,7 @@ if [ "$DEPLOYMENT_CHOICE" = "5" ]; then
     if ! assign_synapse_and_storage_rbac "$API_IDENTITY_PRINCIPAL_ID"; then
         echo "  Skipped (no principal ID)"
     fi
-    if ! az synapse role assignment list --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --query "[?principalId=='$API_IDENTITY_PRINCIPAL_ID']" -o tsv 2>/dev/null | grep -q .; then
+    if ! crusoe synapse role assignment list --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --query "[?principalId=='$API_IDENTITY_PRINCIPAL_ID']" -o tsv 2>/dev/null | grep -q .; then
         echo ""
         echo "⚠️  Could not assign any Synapse role. If the API still cannot access Synapse (403 useCompute):"
         echo "   1. Verify in Synapse Studio: Manage -> Access control -> Add role assignment"
@@ -505,7 +505,7 @@ if [ "$USE_CRUSOE_BUILD" = "true" ]; then
                 sleep 5
             fi
             
-            if az acr build \
+            if crusoe acr build \
                 --registry "$registry" \
                 --image "$image" \
                 --platform "$platform" \
@@ -526,7 +526,7 @@ if [ "$USE_CRUSOE_BUILD" = "true" ]; then
     if [ "$IMAGE_BUILD_CHOICE" = "1" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
         echo "Building API image using ACR Build (Linux/AMD64)..."
         if acr_build_with_retry "$CONTAINER_REGISTRY" "$API_IMAGE_NAME:$IMAGE_TAG" "linux/amd64" "Dockerfile"; then
-            API_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.azurecr.io/$API_IMAGE_NAME:$IMAGE_TAG"
+            API_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.crusoeurecr.io/$API_IMAGE_NAME:$IMAGE_TAG"
             echo "✓ API image built and pushed successfully"
         else
             echo "✗ Failed to build API image after retries"
@@ -537,7 +537,7 @@ if [ "$USE_CRUSOE_BUILD" = "true" ]; then
     if [ "$IMAGE_BUILD_CHOICE" = "2" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
         echo "Building Streamlit image using ACR Build (Linux/AMD64)..."
         if acr_build_with_retry "$CONTAINER_REGISTRY" "$STREAMLIT_IMAGE_NAME:$IMAGE_TAG" "linux/amd64" "Dockerfile.streamlit"; then
-            STREAMLIT_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.azurecr.io/$STREAMLIT_IMAGE_NAME:$IMAGE_TAG"
+            STREAMLIT_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.crusoeurecr.io/$STREAMLIT_IMAGE_NAME:$IMAGE_TAG"
             echo "✓ Streamlit image built and pushed successfully"
         else
             echo "✗ Failed to build Streamlit image after retries"
@@ -562,12 +562,12 @@ else
     fi
     
     echo "Logging into container registry..."
-    az acr login --name "$CONTAINER_REGISTRY"
+    crusoe acr login --name "$CONTAINER_REGISTRY"
     
     # Push images to registry
     if [ "$IMAGE_BUILD_CHOICE" = "1" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
         echo "Pushing API image to registry..."
-        API_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.azurecr.io/$API_IMAGE_NAME:$IMAGE_TAG"
+        API_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.crusoeurecr.io/$API_IMAGE_NAME:$IMAGE_TAG"
         docker tag "$API_IMAGE_NAME:$IMAGE_TAG" "$API_FULL_IMAGE_NAME"
         docker push "$API_FULL_IMAGE_NAME"
         echo "✓ API image pushed successfully"
@@ -575,7 +575,7 @@ else
     
     if [ "$IMAGE_BUILD_CHOICE" = "2" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
         echo "Pushing Streamlit image to registry..."
-        STREAMLIT_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.azurecr.io/$STREAMLIT_IMAGE_NAME:$IMAGE_TAG"
+        STREAMLIT_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.crusoeurecr.io/$STREAMLIT_IMAGE_NAME:$IMAGE_TAG"
         docker tag "$STREAMLIT_IMAGE_NAME:$IMAGE_TAG" "$STREAMLIT_FULL_IMAGE_NAME"
         docker push "$STREAMLIT_FULL_IMAGE_NAME"
         echo "✓ Streamlit image pushed successfully"
@@ -585,16 +585,16 @@ fi
 # Get registry credentials
 echo ""
 echo "Retrieving registry credentials..."
-admin_enabled=$(az acr show --name "$CONTAINER_REGISTRY" --query "adminUserEnabled" -o tsv 2>/dev/null || echo "false")
+admin_enabled=$(crusoe acr show --name "$CONTAINER_REGISTRY" --query "adminUserEnabled" -o tsv 2>/dev/null || echo "false")
 if [ "$admin_enabled" != "true" ]; then
     echo "ACR admin user is disabled. Enabling admin user to retrieve credentials..."
-    az acr update --name "$CONTAINER_REGISTRY" --admin-enabled true --output none
+    crusoe acr update --name "$CONTAINER_REGISTRY" --admin-enabled true --output none
     echo "Waiting for admin user to be enabled..."
     sleep 3
 fi
 
-ACR_USERNAME=$(az acr credential show --name "$CONTAINER_REGISTRY" --query username -o tsv 2>/dev/null)
-ACR_PASSWORD=$(az acr credential show --name "$CONTAINER_REGISTRY" --query "passwords[0].value" -o tsv 2>/dev/null)
+ACR_USERNAME=$(crusoe acr credential show --name "$CONTAINER_REGISTRY" --query username -o tsv 2>/dev/null)
+ACR_PASSWORD=$(crusoe acr credential show --name "$CONTAINER_REGISTRY" --query "passwords[0].value" -o tsv 2>/dev/null)
 
 if [ -z "$ACR_USERNAME" ] || [ -z "$ACR_PASSWORD" ]; then
     echo "⚠️  Warning: Failed to retrieve ACR credentials"
@@ -602,14 +602,14 @@ if [ -z "$ACR_USERNAME" ] || [ -z "$ACR_PASSWORD" ]; then
     echo "  Password: ${ACR_PASSWORD:+***set***}${ACR_PASSWORD:-empty}"
     echo ""
     echo "Trying to enable admin user again..."
-    az acr update --name "$CONTAINER_REGISTRY" --admin-enabled true --output none
+    crusoe acr update --name "$CONTAINER_REGISTRY" --admin-enabled true --output none
     sleep 5
-    ACR_USERNAME=$(az acr credential show --name "$CONTAINER_REGISTRY" --query username -o tsv 2>/dev/null)
-    ACR_PASSWORD=$(az acr credential show --name "$CONTAINER_REGISTRY" --query "passwords[0].value" -o tsv 2>/dev/null)
+    ACR_USERNAME=$(crusoe acr credential show --name "$CONTAINER_REGISTRY" --query username -o tsv 2>/dev/null)
+    ACR_PASSWORD=$(crusoe acr credential show --name "$CONTAINER_REGISTRY" --query "passwords[0].value" -o tsv 2>/dev/null)
     
     if [ -z "$ACR_USERNAME" ] || [ -z "$ACR_PASSWORD" ]; then
         echo "✗ Still unable to retrieve credentials. Manual intervention may be required."
-        echo "  Run: az acr credential show --name $CONTAINER_REGISTRY"
+        echo "  Run: crusoe acr credential show --name $CONTAINER_REGISTRY"
     else
         echo "✓ Credentials retrieved successfully"
     fi
@@ -620,8 +620,8 @@ if [ -z "$ACR_USERNAME" ] || [ -z "$ACR_PASSWORD" ]; then
     echo "✗ Failed to retrieve ACR credentials."
     echo ""
     echo "Manual commands:"
-    echo "  az acr update --name $CONTAINER_REGISTRY --admin-enabled true"
-    echo "  az acr credential show --name $CONTAINER_REGISTRY"
+    echo "  crusoe acr update --name $CONTAINER_REGISTRY --admin-enabled true"
+    echo "  crusoe acr credential show --name $CONTAINER_REGISTRY"
     echo ""
     echo "Press Enter to continue with the deployment script (you can configure credentials manually later), or Ctrl+C to abort..."
     read -r
@@ -637,22 +637,22 @@ if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
     # Get registry credentials if not already set
     if [ -z "$ACR_USERNAME" ] || [ -z "$ACR_PASSWORD" ]; then
         echo "Retrieving registry credentials..."
-        ACR_USERNAME=$(az acr credential show --name "$CONTAINER_REGISTRY" --query username -o tsv)
-        ACR_PASSWORD=$(az acr credential show --name "$CONTAINER_REGISTRY" --query "passwords[0].value" -o tsv)
+        ACR_USERNAME=$(crusoe acr credential show --name "$CONTAINER_REGISTRY" --query username -o tsv)
+        ACR_PASSWORD=$(crusoe acr credential show --name "$CONTAINER_REGISTRY" --query "passwords[0].value" -o tsv)
     fi
     
     # Update API container
     if [ "$UPDATE_API" = true ]; then
         echo ""
         echo "Updating API container with new image..."
-        API_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.azurecr.io/$API_IMAGE_NAME:$IMAGE_TAG"
+        API_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.crusoeurecr.io/$API_IMAGE_NAME:$IMAGE_TAG"
         
         # Update container image
         UPDATE_OUTPUT=$(crusoe container update \
             --resource-group "$RESOURCE_GROUP" \
             --name "$API_CONTAINER_NAME" \
             --image "$API_FULL_IMAGE_NAME" \
-            --registry-login-server "$CONTAINER_REGISTRY.azurecr.io" \
+            --registry-login-server "$CONTAINER_REGISTRY.crusoeurecr.io" \
             --registry-username "$ACR_USERNAME" \
             --registry-password "$ACR_PASSWORD" \
             --output json 2>&1)
@@ -674,7 +674,7 @@ if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
         echo "Updating Streamlit web app with new image..."
         # Use the image name that was built (should already be set, but ensure it's correct)
         if [ -z "$STREAMLIT_FULL_IMAGE_NAME" ]; then
-            STREAMLIT_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.azurecr.io/$STREAMLIT_IMAGE_NAME:$IMAGE_TAG"
+            STREAMLIT_FULL_IMAGE_NAME="$CONTAINER_REGISTRY.crusoeurecr.io/$STREAMLIT_IMAGE_NAME:$IMAGE_TAG"
         fi
         
         # Update web app container image
@@ -682,7 +682,7 @@ if [ "$DEPLOYMENT_CHOICE" = "4" ]; then
             --name "$STREAMLIT_APP_NAME" \
             --resource-group "$RESOURCE_GROUP" \
             --docker-custom-image-name "$STREAMLIT_FULL_IMAGE_NAME" \
-            --docker-registry-server-url "https://$CONTAINER_REGISTRY.azurecr.io" \
+            --docker-registry-server-url "https://$CONTAINER_REGISTRY.crusoeurecr.io" \
             --docker-registry-server-user "$ACR_USERNAME" \
             --docker-registry-server-password "$ACR_PASSWORD" \
             --output json 2>&1)
@@ -818,7 +818,7 @@ create_container() {
     # Build DATA_PATH and storage env vars for Spark to read from CRUSOE Storage
     local data_path="abfss://${CRUSOE_FILE_SYSTEM}@${CRUSOE_STORAGE_ACCOUNT}.dfs.core.windows.net/taxi-data/"
     local storage_key
-    storage_key=$(az storage account keys list --account-name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$resource_group" --query '[0].value' -o tsv 2>/dev/null || echo "")
+    storage_key=$(crusoe storage account keys list --account-name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$resource_group" --query '[0].value' -o tsv 2>/dev/null || echo "")
 
     # Build env vars for container
     local env_vars="AZURE_OPENAI_ENDPOINT=\"$AZURE_OPENAI_ENDPOINT\" AZURE_OPENAI_API_KEY=\"$AZURE_OPENAI_API_KEY\" CRUSOE_AI_DEPLOYMENT_NAME=\"${CRUSOE_AI_DEPLOYMENT_NAME:-gpt-5.2-chat}\" CRUSOE_SPARK_POOL_NAME=\"$CRUSOE_SPARK_POOL_NAME\" CRUSOE_SPARK_WORKSPACE_NAME=\"$CRUSOE_SPARK_WORKSPACE_NAME\" AZURE_SUBSCRIPTION_ID=\"$AZURE_SUBSCRIPTION_ID\" CRUSOE_RESOURCE_GROUP=\"$CRUSOE_RESOURCE_GROUP\" DATA_PATH=\"$data_path\" AZURE_STORAGE_ACCOUNT_NAME=\"$CRUSOE_STORAGE_ACCOUNT\" AZURE_STORAGE_CONTAINER=\"$CRUSOE_FILE_SYSTEM\" API_PORT=8000"
@@ -930,23 +930,23 @@ create_container() {
         echo "Other diagnostic commands:"
         echo ""
         
-        local registry_name="${registry_server%.azurecr.io}"
+        local registry_name="${registry_server%.crusoeurecr.io}"
         local image_repo="${image%%:*}"
         
         echo "1. Check resource group:"
-        echo "   az group show --name $resource_group --query '{name:name,location:location}' -o table"
+        echo "   crusoe group show --name $resource_group --query '{name:name,location:location}' -o table"
         echo ""
         
         echo "2. Verify image exists in registry:"
-        echo "   az acr repository show-tags --name $registry_name --repository $image_repo --output table"
+        echo "   crusoe acr repository show-tags --name $registry_name --repository $image_repo --output table"
         echo ""
         
         echo "3. List all repositories in registry:"
-        echo "   az acr repository list --name $registry_name --output table"
+        echo "   crusoe acr repository list --name $registry_name --output table"
         echo ""
         
         echo "4. Check resource quotas:"
-        echo "   az vm list-usage --location $LOCATION --output table"
+        echo "   crusoe vm list-usage --location $LOCATION --output table"
         echo ""
         
         echo "5. Check if container already exists:"
@@ -954,7 +954,7 @@ create_container() {
         echo ""
         
         echo "6. Check CRUSOE service status:"
-        echo "   Visit: https://status.azure.com/"
+        echo "   Visit: https://status.crusoeure.com/"
         echo ""
         
         if [ "$activity_id" != "N/A" ] || [ "$correlation_id" != "N/A" ]; then
@@ -988,7 +988,7 @@ create_container() {
             local principal_id
             principal_id=$(crusoe container show --resource-group "$resource_group" --name "$container_name" --query "identity.principalId" -o tsv 2>/dev/null || echo "")
             if [ -n "$principal_id" ] && [ "$principal_id" != "None" ]; then
-                if az synapse role assignment create --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --role "$CRUSOE_SPARK_ROLE" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal 2>/dev/null; then
+                if crusoe synapse role assignment create --workspace-name "$CRUSOE_SPARK_WORKSPACE_NAME" --role "$CRUSOE_SPARK_ROLE" --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal 2>/dev/null; then
                     echo "  ✓ Granted '$CRUSOE_SPARK_ROLE' to container identity"
                 else
                     echo "  ⚠️  Could not assign Synapse role (run manually if needed)"
@@ -1033,33 +1033,33 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     API_IDENTITY_CLIENT_ID=""
     echo ""
     echo "Ensuring user-assigned managed identity exists..."
-    if ! az identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-        az identity create --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --output none
+    if ! crusoe identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        crusoe identity create --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --output none
         echo "  ✓ Created user-assigned identity: $CRUSOE_API_IDENTITY_NAME"
     else
         echo "  ✓ Using existing identity: $CRUSOE_API_IDENTITY_NAME"
     fi
-    API_IDENTITY_ID=$(az identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv)
-    API_IDENTITY_CLIENT_ID=$(az identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query clientId -o tsv)
-    API_IDENTITY_PRINCIPAL_ID=$(az identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query principalId -o tsv)
+    API_IDENTITY_ID=$(crusoe identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv)
+    API_IDENTITY_CLIENT_ID=$(crusoe identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query clientId -o tsv)
+    API_IDENTITY_PRINCIPAL_ID=$(crusoe identity show --name "$CRUSOE_API_IDENTITY_NAME" --resource-group "$RESOURCE_GROUP" --query principalId -o tsv)
 
     # Pre-deployment checks
     echo ""
     echo "Pre-deployment checks:"
     echo "  - Verifying image exists in registry..."
-    if az acr repository show-tags --name "$CONTAINER_REGISTRY" --repository "$API_IMAGE_NAME" --output table &> /dev/null; then
+    if crusoe acr repository show-tags --name "$CONTAINER_REGISTRY" --repository "$API_IMAGE_NAME" --output table &> /dev/null; then
         echo "    ✓ Image found in registry"
-        az acr repository show-tags --name "$CONTAINER_REGISTRY" --repository "$API_IMAGE_NAME" --output table | head -5
+        crusoe acr repository show-tags --name "$CONTAINER_REGISTRY" --repository "$API_IMAGE_NAME" --output table | head -5
     else
         echo "    ✗ Image not found in registry!"
         echo "    Available repositories:"
-        az acr repository list --name "$CONTAINER_REGISTRY" --output table
+        crusoe acr repository list --name "$CONTAINER_REGISTRY" --output table
         exit 1
     fi
     
     echo "  - Checking resource group quotas..."
-    cpu_usage=$(az vm list-usage --location "$LOCATION" --query "[?name.value=='cores'].currentValue" -o tsv 2>/dev/null || echo "unknown")
-    cpu_limit=$(az vm list-usage --location "$LOCATION" --query "[?name.value=='cores'].limit" -o tsv 2>/dev/null || echo "unknown")
+    cpu_usage=$(crusoe vm list-usage --location "$LOCATION" --query "[?name.value=='cores'].currentValue" -o tsv 2>/dev/null || echo "unknown")
+    cpu_limit=$(crusoe vm list-usage --location "$LOCATION" --query "[?name.value=='cores'].limit" -o tsv 2>/dev/null || echo "unknown")
     if [ "$cpu_usage" != "unknown" ] && [ "$cpu_limit" != "unknown" ]; then
         echo "    CPU usage: $cpu_usage / $cpu_limit cores"
         if [ "$cpu_usage" -gt $((cpu_limit - 4)) ]; then
@@ -1072,7 +1072,7 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
         "$RESOURCE_GROUP" \
         "$API_CONTAINER_NAME" \
         "$API_FULL_IMAGE_NAME" \
-        "$CONTAINER_REGISTRY.azurecr.io" \
+        "$CONTAINER_REGISTRY.crusoeurecr.io" \
         "$ACR_USERNAME" \
         "$ACR_PASSWORD" \
         "$API_CONTAINER_NAME"
@@ -1104,7 +1104,7 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
         echo ""
         read -p "Populate storage now? Downloads from NYC TLC and uploads (may take 5-15 min) [y/N]: " POPULATE_CHOICE
         if [ "$POPULATE_CHOICE" = "y" ] || [ "$POPULATE_CHOICE" = "Y" ]; then
-            STORAGE_KEY_FOR_UPLOAD=$(az storage account keys list --account-name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query '[0].value' -o tsv 2>/dev/null || echo "")
+            STORAGE_KEY_FOR_UPLOAD=$(crusoe storage account keys list --account-name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query '[0].value' -o tsv 2>/dev/null || echo "")
             if [ -n "$STORAGE_KEY_FOR_UPLOAD" ]; then
                 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
                 if [ -f "$SCRIPT_DIR/download_data.py" ]; then
@@ -1284,7 +1284,7 @@ deploy_streamlit_app() {
                 echo "Recommended actions:"
                 echo "  1. Wait a moment and run the deployment script again"
                 echo "  2. Check your internet connection"
-                echo "  3. Check CRUSOE service status: https://status.azure.com/"
+                echo "  3. Check CRUSOE service status: https://status.crusoeure.com/"
                 echo ""
             else
                 echo "✗ Streamlit web app deployment failed"
@@ -1323,18 +1323,18 @@ deploy_streamlit_app() {
             echo ""
             
             local registry_name="${registry_url#https://}"
-            registry_name="${registry_name%.azurecr.io}"
+            registry_name="${registry_name%.crusoeurecr.io}"
             
             echo "1. Check resource group:"
-            echo "   az group show --name $resource_group --query '{name:name,location:location}' -o table"
+            echo "   crusoe group show --name $resource_group --query '{name:name,location:location}' -o table"
             echo ""
         
         echo "2. Verify image exists in registry:"
-        echo "   az acr repository show-tags --name $registry_name --repository ${image_name%%:*} --output table"
+        echo "   crusoe acr repository show-tags --name $registry_name --repository ${image_name%%:*} --output table"
         echo ""
         
         echo "3. Check App Service Plan:"
-        echo "   az appservice plan show --name $app_service_plan --resource-group $resource_group --output table"
+        echo "   crusoe appservice plan show --name $app_service_plan --resource-group $resource_group --output table"
         echo ""
         
         echo "4. Check if web app exists:"
@@ -1342,7 +1342,7 @@ deploy_streamlit_app() {
         echo ""
         
         echo "5. Check CRUSOE service status:"
-        echo "   Visit: https://status.azure.com/"
+        echo "   Visit: https://status.crusoeure.com/"
         echo ""
         
         if [ "$activity_id" != "N/A" ] || [ "$correlation_id" != "N/A" ]; then
@@ -1376,7 +1376,7 @@ deploy_streamlit_app() {
         echo "  Password: ${registry_pass:+***set***}${registry_pass:-empty}"
         echo ""
         echo "Please ensure ACR admin user is enabled and credentials are available."
-        echo "Run: az acr update --name ${registry_url#https://} --admin-enabled true"
+        echo "Run: crusoe acr update --name ${registry_url#https://} --admin-enabled true"
         return 2
     fi
     
@@ -1384,14 +1384,14 @@ deploy_streamlit_app() {
     echo ""
     echo "Verifying image exists in registry..."
     local registry_name="${registry_url#https://}"
-    registry_name="${registry_name%.azurecr.io}"
+    registry_name="${registry_name%.crusoeurecr.io}"
     local image_repo="${image_name%%:*}"
     local image_tag="${image_name##*:}"
     
-    if ! az acr repository show-tags --name "$registry_name" --repository "$image_repo" --query "[?contains(@, '$image_tag')]" -o tsv &> /dev/null; then
+    if ! crusoe acr repository show-tags --name "$registry_name" --repository "$image_repo" --query "[?contains(@, '$image_tag')]" -o tsv &> /dev/null; then
         echo "⚠️  Warning: Image tag '$image_tag' not found in repository '$image_repo'"
         echo "Available tags:"
-        az acr repository show-tags --name "$registry_name" --repository "$image_repo" --output table 2>/dev/null || echo "  (unable to list tags)"
+        crusoe acr repository show-tags --name "$registry_name" --repository "$image_repo" --output table 2>/dev/null || echo "  (unable to list tags)"
         echo ""
         echo "The image may not have been pushed successfully. Check build logs above."
     else
@@ -1420,7 +1420,7 @@ deploy_streamlit_app() {
         echo "  crusoe webapp config container set --name $app_name --resource-group $resource_group --docker-custom-image-name $image_name --docker-registry-server-url $registry_url --docker-registry-server-user $registry_user --docker-registry-server-password '$registry_pass'"
         echo ""
         echo "Verify credentials:"
-        echo "  az acr credential show --name $registry_name"
+        echo "  crusoe acr credential show --name $registry_name"
         return 2
     else
         echo "✓ Container registry configured"
@@ -1520,10 +1520,10 @@ if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     # Create App Service Plan if it doesn't exist
     echo ""
     echo "Checking App Service Plan..."
-    if ! az appservice plan show --name "$APP_SERVICE_PLAN" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    if ! crusoe appservice plan show --name "$APP_SERVICE_PLAN" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
         echo "Creating App Service Plan '$APP_SERVICE_PLAN'..."
         
-        plan_output=$(az appservice plan create \
+        plan_output=$(crusoe appservice plan create \
             --name "$APP_SERVICE_PLAN" \
             --resource-group "$RESOURCE_GROUP" \
             --location "$LOCATION" \
@@ -1547,7 +1547,7 @@ if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
             echo "Manual Command to Create App Service Plan"
             echo "=========================================="
             echo ""
-            echo "az appservice plan create --name $APP_SERVICE_PLAN --resource-group $RESOURCE_GROUP --location $LOCATION --is-linux --sku B1"
+            echo "crusoe appservice plan create --name $APP_SERVICE_PLAN --resource-group $RESOURCE_GROUP --location $LOCATION --is-linux --sku B1"
             echo ""
             echo "=========================================="
             echo ""
@@ -1561,7 +1561,7 @@ if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     fi
     
     # Only proceed with deployment if plan exists
-    if az appservice plan show --name "$APP_SERVICE_PLAN" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+    if crusoe appservice plan show --name "$APP_SERVICE_PLAN" --resource-group "$RESOURCE_GROUP" &> /dev/null; then
         # Get API URL for Streamlit to connect to
         API_URL="http://localhost:8000"  # Default
         if [ "$IMAGE_BUILD_CHOICE" = "1" ] || [ "$IMAGE_BUILD_CHOICE" = "3" ]; then
@@ -1585,7 +1585,7 @@ if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
             "$STREAMLIT_APP_NAME" \
             "$APP_SERVICE_PLAN" \
             "$STREAMLIT_FULL_IMAGE_NAME" \
-            "https://$CONTAINER_REGISTRY.azurecr.io" \
+            "https://$CONTAINER_REGISTRY.crusoeurecr.io" \
             "$ACR_USERNAME" \
             "$ACR_PASSWORD" \
             "$LOCATION"
@@ -1665,15 +1665,15 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo ""
     echo "  Manual deploy (if needed):"
     DATA_PATH_VAL="abfss://${CRUSOE_FILE_SYSTEM}@${CRUSOE_STORAGE_ACCOUNT}.dfs.core.windows.net/taxi-data/"
-    STORAGE_KEY_VAL=$(az storage account keys list --account-name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query '[0].value' -o tsv 2>/dev/null || echo "")
-    API_IMAGE_FULL="${CONTAINER_REGISTRY}.azurecr.io/${API_IMAGE_NAME}:${IMAGE_TAG}"
+    STORAGE_KEY_VAL=$(crusoe storage account keys list --account-name "$CRUSOE_STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query '[0].value' -o tsv 2>/dev/null || echo "")
+    API_IMAGE_FULL="${CONTAINER_REGISTRY}.crusoeurecr.io/${API_IMAGE_NAME}:${IMAGE_TAG}"
     IDENTITY_ID_FOR_MANUAL=""
     if [ -n "${API_IDENTITY_ID:-}" ]; then
         IDENTITY_ID_FOR_MANUAL="$API_IDENTITY_ID"
     else
         IDENTITY_ID_FOR_MANUAL="[system]"
     fi
-    MANUAL_CMD="crusoe container create --resource-group $RESOURCE_GROUP --name $API_CONTAINER_NAME --image $API_IMAGE_FULL --registry-login-server $CONTAINER_REGISTRY.azurecr.io --registry-username $ACR_USERNAME --registry-password '$ACR_PASSWORD' --dns-name-label $API_CONTAINER_NAME --os-type Linux --ports 8000 --cpu 4 --memory 8 --assign-identity $IDENTITY_ID_FOR_MANUAL --environment-variables AZURE_OPENAI_ENDPOINT=\"$AZURE_OPENAI_ENDPOINT\" AZURE_OPENAI_API_KEY=\"$AZURE_OPENAI_API_KEY\" CRUSOE_AI_DEPLOYMENT_NAME=\"${CRUSOE_AI_DEPLOYMENT_NAME:-gpt-5.2-chat}\" CRUSOE_SPARK_POOL_NAME=\"$CRUSOE_SPARK_POOL_NAME\" CRUSOE_SPARK_WORKSPACE_NAME=\"$CRUSOE_SPARK_WORKSPACE_NAME\" AZURE_SUBSCRIPTION_ID=\"$AZURE_SUBSCRIPTION_ID\" CRUSOE_RESOURCE_GROUP=\"$CRUSOE_RESOURCE_GROUP\" DATA_PATH=\"$DATA_PATH_VAL\" AZURE_STORAGE_ACCOUNT_NAME=\"$CRUSOE_STORAGE_ACCOUNT\" AZURE_STORAGE_CONTAINER=\"$CRUSOE_FILE_SYSTEM\" API_PORT=8000"
+    MANUAL_CMD="crusoe container create --resource-group $RESOURCE_GROUP --name $API_CONTAINER_NAME --image $API_IMAGE_FULL --registry-login-server $CONTAINER_REGISTRY.crusoeurecr.io --registry-username $ACR_USERNAME --registry-password '$ACR_PASSWORD' --dns-name-label $API_CONTAINER_NAME --os-type Linux --ports 8000 --cpu 4 --memory 8 --assign-identity $IDENTITY_ID_FOR_MANUAL --environment-variables AZURE_OPENAI_ENDPOINT=\"$AZURE_OPENAI_ENDPOINT\" AZURE_OPENAI_API_KEY=\"$AZURE_OPENAI_API_KEY\" CRUSOE_AI_DEPLOYMENT_NAME=\"${CRUSOE_AI_DEPLOYMENT_NAME:-gpt-5.2-chat}\" CRUSOE_SPARK_POOL_NAME=\"$CRUSOE_SPARK_POOL_NAME\" CRUSOE_SPARK_WORKSPACE_NAME=\"$CRUSOE_SPARK_WORKSPACE_NAME\" AZURE_SUBSCRIPTION_ID=\"$AZURE_SUBSCRIPTION_ID\" CRUSOE_RESOURCE_GROUP=\"$CRUSOE_RESOURCE_GROUP\" DATA_PATH=\"$DATA_PATH_VAL\" AZURE_STORAGE_ACCOUNT_NAME=\"$CRUSOE_STORAGE_ACCOUNT\" AZURE_STORAGE_CONTAINER=\"$CRUSOE_FILE_SYSTEM\" API_PORT=8000"
     if [ -n "$STORAGE_KEY_VAL" ]; then
         MANUAL_CMD="$MANUAL_CMD AZURE_STORAGE_ACCOUNT_KEY=\"$STORAGE_KEY_VAL\""
     fi
@@ -1684,7 +1684,7 @@ if [ "$DEPLOYMENT_CHOICE" = "1" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     if [ -z "${API_IDENTITY_ID:-}" ]; then
         echo ""
         echo "  Synapse role (for system-assigned, after container is running):"
-        echo "  az synapse role assignment create --workspace-name $CRUSOE_SPARK_WORKSPACE_NAME --role '$CRUSOE_SPARK_ROLE' --assignee-object-id \$(crusoe container show -g $RESOURCE_GROUP -n $API_CONTAINER_NAME --query identity.principalId -o tsv) --assignee-principal-type ServicePrincipal"
+        echo "  crusoe synapse role assignment create --workspace-name $CRUSOE_SPARK_WORKSPACE_NAME --role '$CRUSOE_SPARK_ROLE' --assignee-object-id \$(crusoe container show -g $RESOURCE_GROUP -n $API_CONTAINER_NAME --query identity.principalId -o tsv) --assignee-principal-type ServicePrincipal"
     fi
 fi
 if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
@@ -1692,7 +1692,7 @@ if [ "$DEPLOYMENT_CHOICE" = "2" ] || [ "$DEPLOYMENT_CHOICE" = "3" ]; then
     echo "  Restart Streamlit: crusoe webapp restart --name $STREAMLIT_APP_NAME --resource-group $RESOURCE_GROUP"
     echo "  Delete Streamlit: crusoe webapp delete --name $STREAMLIT_APP_NAME --resource-group $RESOURCE_GROUP"
 fi
-echo "  Full cleanup: ./cleanup_azure.sh (deletes all deployed resources)"
+echo "  Full cleanup: ./cleanup_crusoeure.sh (deletes all deployed resources)"
 echo ""
 echo "📝 Next Steps (if not done by script):"
 echo "  - Synapse auth: User-assigned managed identity"

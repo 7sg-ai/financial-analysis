@@ -7,11 +7,11 @@ echo "Financial Analysis Streamlit - CRUSOE Deployment"
 echo "=================================="
 
 # Configuration
-RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-financial-analysis}"
-LOCATION="${AZURE_LOCATION:-eastus}"
-APP_SERVICE_PLAN="${APP_SERVICE_PLAN:-financial-analysis-plan}"
-APP_NAME="${APP_NAME:-financial-analysis-streamlit}"
-CONTAINER_REGISTRY="${AZURE_CONTAINER_REGISTRY:-financialanalysisacr}"
+RESOURCE_GROUP="${CRUSOE_RESOURCE_GROUP:-rg-financial-analysis}"
+LOCATION="${CRUSOE_LOCATION:-eastus}"
+APP_SERVICE_PLAN="${CRUSOE_APP_SERVICE_PLAN:-financial-analysis-plan}"
+APP_NAME="${CRUSOE_APP_NAME:-financial-analysis-streamlit}"
+CONTAINER_REGISTRY="${CRUSOE_CONTAINER_REGISTRY:-financialanalysisacr}"
 IMAGE_NAME="financial-analysis-streamlit"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 

@@ -92,18 +92,18 @@ print_header "Azure Resource Power Down Script"
 # Check if logged in to Azure
 echo ""
 echo "Checking Azure CLI login status..."
-if ! az account show &> /dev/null; then
-    print_error "Not logged in to Azure CLI. Please run 'az login' first."
+if ! crusoe account show &> /dev/null; then
+    print_error "Not logged in to Azure CLI. Please run 'crusoe login' first."
     exit 1
 fi
 
-SUBSCRIPTION=$(az account show --query name -o tsv)
+SUBSCRIPTION=$(crusoe account show --query name -o tsv)
 print_success "Logged in to Azure subscription: $SUBSCRIPTION"
 
 # Verify resource group exists
 echo ""
 echo "Verifying resource group '$RESOURCE_GROUP' exists..."
-if ! az group show --name "$RESOURCE_GROUP" &> /dev/null; then
+if ! crusoe group show --name "$RESOURCE_GROUP" &> /dev/null; then
     print_error "Resource group '$RESOURCE_GROUP' not found"
     exit 1
 fi
@@ -117,12 +117,12 @@ print_header "Discovering Resources to Stop"
 # 1. Virtual Machines
 echo ""
 echo "Checking for Virtual Machines..."
-VMS=$(az vm list --resource-group "$RESOURCE_GROUP" --query "[].{name:name, powerState:powerState}" -o tsv 2>/dev/null || echo "")
+VMS=$(crusoe vm list --resource-group "$RESOURCE_GROUP" --query "[].{name:name, powerState:powerState}" -o tsv 2>/dev/null || echo "")
 if [ -n "$VMS" ]; then
     while IFS=$'\t' read -r name state; do
         if [ -n "$name" ]; then
             # Get power state
-            power_state=$(az vm get-instance-view --resource-group "$RESOURCE_GROUP" --name "$name" --query "instanceView.statuses[?starts_with(code, 'PowerState/')].displayStatus" -o tsv 2>/dev/null || echo "Unknown")
+            power_state=$(crusoe vm get-instance-view --resource-group "$RESOURCE_GROUP" --name "$name" --query "instanceView.statuses[?starts_with(code, 'PowerState/')].displayStatus" -o tsv 2>/dev/null || echo "Unknown")
             if [[ "$power_state" != *"deallocated"* ]] && [[ "$power_state" != *"stopped"* ]]; then
                 print_info "VM: $name (Status: $power_state)"
                 RESOURCES_TO_STOP+=("vm:$name")
@@ -138,7 +138,7 @@ fi
 # 2. Container Instances
 echo ""
 echo "Checking for Container Instances..."
-CONTAINERS=$(az container list --resource-group "$RESOURCE_GROUP" --query "[].{name:name, state:instanceView.state}" -o tsv 2>/dev/null || echo "")
+CONTAINERS=$(crusoe container list --resource-group "$RESOURCE_GROUP" --query "[].{name:name, state:instanceView.state}" -o tsv 2>/dev/null || echo "")
 if [ -n "$CONTAINERS" ]; then
     while IFS=$'\t' read -r name state; do
         if [ -n "$name" ]; then
@@ -153,7 +153,7 @@ fi
 # 3. App Services (Web Apps)
 echo ""
 echo "Checking for App Services..."
-WEBAPPS=$(az webapp list --resource-group "$RESOURCE_GROUP" --query "[].{name:name, state:state}" -o tsv 2>/dev/null || echo "")
+WEBAPPS=$(crusoe webapp list --resource-group "$RESOURCE_GROUP" --query "[].{name:name, state:state}" -o tsv 2>/dev/null || echo "")
 if [ -n "$WEBAPPS" ]; then
     while IFS=$'\t' read -r name state; do
         if [ -n "$name" ]; then
@@ -172,10 +172,10 @@ fi
 # 4. Azure Synapse Spark Pools
 echo ""
 echo "Checking for Synapse Spark Pools..."
-SYNAPSE_WORKSPACES=$(az synapse workspace list --resource-group "$RESOURCE_GROUP" --query "[].name" -o tsv 2>/dev/null || echo "")
+SYNAPSE_WORKSPACES=$(crusoe synapse workspace list --resource-group "$RESOURCE_GROUP" --query "[].name" -o tsv 2>/dev/null || echo "")
 if [ -n "$SYNAPSE_WORKSPACES" ]; then
     for workspace in $SYNAPSE_WORKSPACES; do
-        SPARK_POOLS=$(az synapse spark pool list --resource-group "$RESOURCE_GROUP" --workspace-name "$workspace" --query "[].{name:name, state:provisioningState}" -o tsv 2>/dev/null || echo "")
+        SPARK_POOLS=$(crusoe synapse spark pool list --resource-group "$RESOURCE_GROUP" --workspace-name "$workspace" --query "[].{name:name, state:provisioningState}" -o tsv 2>/dev/null || echo "")
         if [ -n "$SPARK_POOLS" ]; then
             while IFS=$'\t' read -r name state; do
                 if [ -n "$name" ]; then
@@ -193,7 +193,7 @@ fi
 # 5. Azure Kubernetes Service (AKS)
 echo ""
 echo "Checking for AKS Clusters..."
-AKS_CLUSTERS=$(az aks list --resource-group "$RESOURCE_GROUP" --query "[].{name:name, powerState:powerState.code}" -o tsv 2>/dev/null || echo "")
+AKS_CLUSTERS=$(crusoe aks list --resource-group "$RESOURCE_GROUP" --query "[].{name:name, powerState:powerState.code}" -o tsv 2>/dev/null || echo "")
 if [ -n "$AKS_CLUSTERS" ]; then
     while IFS=$'\t' read -r name state; do
         if [ -n "$name" ]; then
@@ -212,10 +212,10 @@ fi
 # 6. Azure SQL Databases (Serverless can be paused)
 echo ""
 echo "Checking for Azure SQL Databases..."
-SQL_SERVERS=$(az sql server list --resource-group "$RESOURCE_GROUP" --query "[].name" -o tsv 2>/dev/null || echo "")
+SQL_SERVERS=$(crusoe sql server list --resource-group "$RESOURCE_GROUP" --query "[].name" -o tsv 2>/dev/null || echo "")
 if [ -n "$SQL_SERVERS" ]; then
     for server in $SQL_SERVERS; do
-        DATABASES=$(az sql db list --resource-group "$RESOURCE_GROUP" --server "$server" --query "[?name!='master'].{name:name, status:status}" -o tsv 2>/dev/null || echo "")
+        DATABASES=$(crusoe sql db list --resource-group "$RESOURCE_GROUP" --server "$server" --query "[?name!='master'].{name:name, status:status}" -o tsv 2>/dev/null || echo "")
         if [ -n "$DATABASES" ]; then
             while IFS=$'\t' read -r name status; do
                 if [ -n "$name" ]; then
@@ -236,7 +236,7 @@ fi
 # 7. Azure Analysis Services
 echo ""
 echo "Checking for Analysis Services..."
-ANALYSIS_SERVICES=$(az resource list --resource-group "$RESOURCE_GROUP" --resource-type "Microsoft.AnalysisServices/servers" --query "[].name" -o tsv 2>/dev/null || echo "")
+ANALYSIS_SERVICES=$(crusoe resource list --resource-group "$RESOURCE_GROUP" --resource-type "Microsoft.AnalysisServices/servers" --query "[].name" -o tsv 2>/dev/null || echo "")
 if [ -n "$ANALYSIS_SERVICES" ]; then
     for as in $ANALYSIS_SERVICES; do
         print_info "Analysis Services: $as"
@@ -290,7 +290,7 @@ for resource in "${RESOURCES_TO_STOP[@]}"; do
         vm)
             echo ""
             echo "Deallocating VM: $name..."
-            if az vm deallocate --resource-group "$RESOURCE_GROUP" --name "$name" --no-wait 2>/dev/null; then
+            if crusoe vm deallocate --resource-group "$RESOURCE_GROUP" --name "$name" --no-wait 2>/dev/null; then
                 print_success "VM $name deallocation initiated"
                 ((STOPPED++))
             else
@@ -301,7 +301,7 @@ for resource in "${RESOURCES_TO_STOP[@]}"; do
         container)
             echo ""
             echo "Stopping Container Instance: $name..."
-            if az container stop --resource-group "$RESOURCE_GROUP" --name "$name" 2>/dev/null; then
+            if crusoe container stop --resource-group "$RESOURCE_GROUP" --name "$name" 2>/dev/null; then
                 print_success "Container Instance $name stopped"
                 ((STOPPED++))
             else
@@ -312,7 +312,7 @@ for resource in "${RESOURCES_TO_STOP[@]}"; do
         webapp)
             echo ""
             echo "Stopping Web App: $name..."
-            if az webapp stop --resource-group "$RESOURCE_GROUP" --name "$name" 2>/dev/null; then
+            if crusoe webapp stop --resource-group "$RESOURCE_GROUP" --name "$name" 2>/dev/null; then
                 print_success "Web App $name stopped"
                 ((STOPPED++))
             else
@@ -323,7 +323,7 @@ for resource in "${RESOURCES_TO_STOP[@]}"; do
         aks)
             echo ""
             echo "Stopping AKS Cluster: $name..."
-            if az aks stop --resource-group "$RESOURCE_GROUP" --name "$name" --no-wait 2>/dev/null; then
+            if crusoe aks stop --resource-group "$RESOURCE_GROUP" --name "$name" --no-wait 2>/dev/null; then
                 print_success "AKS Cluster $name stop initiated"
                 ((STOPPED++))
             else
@@ -334,7 +334,7 @@ for resource in "${RESOURCES_TO_STOP[@]}"; do
         sqldb)
             echo ""
             echo "Pausing SQL Database: $name/$extra..."
-            if az sql db update --resource-group "$RESOURCE_GROUP" --server "$name" --name "$extra" --compute-model Serverless --auto-pause-delay 60 2>/dev/null; then
+            if crusoe sql db update --resource-group "$RESOURCE_GROUP" --server "$name" --name "$extra" --compute-model Serverless --auto-pause-delay 60 2>/dev/null; then
                 print_success "SQL Database $name/$extra set to auto-pause after 60 minutes"
                 ((STOPPED++))
             else
@@ -344,7 +344,7 @@ for resource in "${RESOURCES_TO_STOP[@]}"; do
         as)
             echo ""
             echo "Suspending Analysis Services: $name..."
-            if az resource invoke-action --resource-group "$RESOURCE_GROUP" --resource-type "Microsoft.AnalysisServices/servers" --name "$name" --action suspend 2>/dev/null; then
+            if crusoe resource invoke-action --resource-group "$RESOURCE_GROUP" --resource-type "Microsoft.AnalysisServices/servers" --name "$name" --action suspend 2>/dev/null; then
                 print_success "Analysis Services $name suspended"
                 ((STOPPED++))
             else
@@ -364,10 +364,10 @@ fi
 
 echo ""
 echo "Note: Some resources (VMs, AKS) are deallocated asynchronously."
-echo "Use 'az resource list --resource-group $RESOURCE_GROUP -o table' to check status."
+echo "Use 'crusoe resource list --resource-group $RESOURCE_GROUP -o table' to check status."
 echo ""
 echo "To power resources back on, use the corresponding start commands:"
-echo "  - VM: az vm start --resource-group $RESOURCE_GROUP --name <vm-name>"
-echo "  - Container: az container start --resource-group $RESOURCE_GROUP --name <container-name>"
-echo "  - Web App: az webapp start --resource-group $RESOURCE_GROUP --name <webapp-name>"
-echo "  - AKS: az aks start --resource-group $RESOURCE_GROUP --name <aks-name>"
+echo "  - VM: crusoe vm start --resource-group $RESOURCE_GROUP --name <vm-name>"
+echo "  - Container: crusoe container start --resource-group $RESOURCE_GROUP --name <container-name>"
+echo "  - Web App: crusoe webapp start --resource-group $RESOURCE_GROUP --name <webapp-name>"
+echo "  - AKS: crusoe aks start --resource-group $RESOURCE_GROUP --name <aks-name>"

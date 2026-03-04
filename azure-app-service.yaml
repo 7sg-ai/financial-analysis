@@ -39,7 +39,7 @@ spec:
     spec:
       containers:
       - name: streamlit-app
-        image: financialanalysisacr.azurecr.io/financial-analysis-streamlit:latest
+        image: financial-analysis-streamlit:latest
         ports:
         - containerPort: 8501
         env:
@@ -47,34 +47,34 @@ spec:
           valueFrom:
             secretKeyRef:
               name: azure-secrets
-              key: openai-endpoint
+              key: crusoe-inference-url
         - name: CRUSOE_API_KEY
           valueFrom:
             secretKeyRef:
               name: azure-secrets
-              key: openai-key
+              key: crusoe-api-key
         - name: CRUSOE_OPENAI_DEPLOYMENT_NAME
           value: "gpt-5.2-chat"
         - name: CRUSOE_SPARK_POOL
           valueFrom:
             secretKeyRef:
               name: azure-secrets
-              key: synapse-spark-pool-name
+              key: crusoe-spark-pool
         - name: CRUSOE_WORKSPACE
           valueFrom:
             secretKeyRef:
               name: azure-secrets
-              key: synapse-workspace-name
+              key: crusoe-workspace
         - name: CRUSOE_SUBSCRIPTION_ID
           valueFrom:
             secretKeyRef:
               name: azure-secrets
-              key: subscription-id
+              key: crusoe-subscription-id
         - name: CRUSOE_RESOURCE_GROUP
           valueFrom:
             secretKeyRef:
               name: azure-secrets
-              key: resource-group
+              key: crusoe-resource-group
         - name: STREAMLIT_PORT
           value: "8501"
         - name: STREAMLIT_HOST

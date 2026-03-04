@@ -1,12 +1,11 @@
 """
 Main analysis engine that orchestrates all components
 Integrates query generation, execution, and response formatting
-Uses Crusoe Managed Inference and Livy-compatible Spark execution.
+Uses Crusoe Managed Inference and Spark batch API execution.
 """
 from typing import Dict, Any, Optional, List
 import logging
 
-from synapse_client import create_synapse_session, SynapseConnectionError
 from data_loader import DataLoader
 from llm_query_generator import QueryGenerator, NarrativeGenerator
 from query_executor import QueryExecutor
@@ -19,16 +18,20 @@ logger = logging.getLogger(__name__)
 class FinancialAnalysisEngine:
     """
     Main engine for financial analysis queries.
-    All Spark execution runs via Livy-compatible HTTP endpoints.
+    All Spark execution runs via CRUSOE Spark batch API.
     """
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self._session = create_synapse_session(settings)
+        self._session = None  # No session needed for batch API
         self.data_loader = DataLoader(
-            livy_endpoint=settings.crusoe_livy_endpoint,
-            livy_username=settings.crusoe_livy_username,
-            livy_password=settings.crusoe_livy_password
+            cloud_storage_account=settings.cloud_storage_account,
+            cloud_storage_access_key=settings.cloud_storage_access_key,
+            cloud_storage_bucket=settings.cloud_storage_bucket,
+            s3_endpoint=settings.crusoe_s3_endpoint,
+            s3_access_key=settings.crusoe_s3_access_key,
+            s3_secret_key=settings.crusoe_s3_secret_key,
+            s3_bucket=settings.crusoe_s3_bucket
         )
         self.query_generator = QueryGenerator(
             endpoint=settings.crusoe_inference_url,
@@ -39,13 +42,13 @@ class FinancialAnalysisEngine:
         self.narrative_generator = NarrativeGenerator(
             endpoint=settings.crusoe_inference_url,
             api_key=settings.crusoe_api_key,
-            deployment_name=settings.crusoe_deployment_name,
+            model_id=settings.crusoe_deployment_name,
             api_version=settings.crusoe_api_version,
         )
-        self.query_executor = QueryExecutor(self._session, max_result_rows=1000)
+        self.query_executor = QueryExecutor(max_result_rows=1000)
         self.response_formatter = ResponseFormatter()
         self._data_loaded = False
-        logger.info("FinancialAnalysisEngine initialized (Crusoe + Livy)")
+        logger.info("FinancialAnalysisEngine initialized (Crusoe + Spark Batch API)")
     
     def initialize_data(
         self,
@@ -64,7 +67,7 @@ class FinancialAnalysisEngine:
             return
         
         logger.info("Initializing data and registering views...")
-        success = self.data_loader.register_temp_views(months=months, year=year)
+        success = self.data_loader.load_s3_parquet_and_create_view(months=months, year=year)
         if success:
             self._data_loaded = True
             logger.info("Data initialization complete")
@@ -78,12 +81,12 @@ class FinancialAnalysisEngine:
         year: Optional[str] = None,
     ) -> bool:
         """
-        Reload data and re-register views in Synapse.
-        With Synapse we always attempt reload when called.
+        Reload data and re-register views in Spark.
+        With Crusoe we always attempt reload when called.
         """
         self.data_loader.clear_cache()
-        logger.info("Reloading data in Synapse...")
-        success = self.data_loader.register_temp_views(months=months, year=year)
+        logger.info("Reloading data in Spark...")
+        success = self.data_loader.load_s3_parquet_and_create_view(months=months, year=year)
         if success:
             self._data_loaded = True
             logger.info("Data views refreshed")
@@ -366,10 +369,7 @@ class FinancialAnalysisEngine:
         return self.query_executor.get_query_history(limit=limit)
     
     def shutdown(self) -> None:
-        """Shutdown the engine and close Synapse session."""
+        """Shutdown the engine and terminate Spark batch job."""
         logger.info("Shutting down FinancialAnalysisEngine")
-        try:
-            self._session.close()
-            logger.info("Synapse session closed")
-        except Exception as e:
-            logger.error(f"Error closing Synapse session: {e}")
+        # No session to close for batch API - job terminates automatically
+        logger.info("FinancialAnalysisEngine shutdown complete")

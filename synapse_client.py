@@ -1,6 +1,6 @@
 """
-Azure Synapse Spark client via Livy REST API.
-All Spark execution happens remotely in Synapse; no local PySpark.
+Crusoe Spark batch client via Crusoe Spark Batch API.
+All Spark execution happens remotely in Crusoe; no local PySpark.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 import requests
-from azure.identity import ClientSecretCredential
+
 
 
 logger = logging.getLogger(__name__)
@@ -19,29 +19,22 @@ logger = logging.getLogger(__name__)
 # Polling config for async statement execution
 STATEMENT_POLL_INTERVAL_SEC = 2
 STATEMENT_MAX_WAIT_SEC = 300
-# Session startup can take 5-10+ min for Large pools (cold start).
-# None = wait indefinitely (container will not restart; keeps waiting for Synapse).
-SESSION_STARTUP_TIMEOUT_SEC = None
+# Batch startup can take 5-10+ min for large jobs (cold start).
+# None = wait indefinitely (container will not restart; keeps waiting for Crusoe).
+BATCH_STARTUP_TIMEOUT_SEC = None
 
-# Livy endpoint from environment
-LIVY_ENDPOINT = os.environ.get('LIVY_ENDPOINT', 'http://localhost:8998')
-# TODO: Crusoe has no managed Synapse equivalent. Use self-hosted Spark Thrift Server or EMR Serverless.
-# Note: Synapse Spark (Livy) is replaced by hybrid_synapse_livy strategy using requests to Livy-compatible endpoint.
+# Crusoe Spark Batch API endpoint from environment
+CRUSOE_SPARK_API_URL = os.environ.get('CRUSOE_SPARK_API_URL', 'http://localhost:8998')
 
 
-class SynapseConnectionError(Exception):
-    """Raised when connection to Azure Synapse fails"""
-    pass
-
-
-class SynapseExecutionError(Exception):
-    """Raised when statement execution fails in Synapse"""
+class SparkBatchJobError(Exception):
+    """Raised when Crusoe Spark batch job fails"""
     pass
 
 
 class SynapseSparkSession:
     """
-    Remote Spark session in Azure Synapse via Livy API.
+    Remote Spark batch job in Crusoe via Spark Batch API.
     Mimics a subset of PySpark SparkSession for SQL and data loading.
     """
 
@@ -54,11 +47,11 @@ class SynapseSparkSession:
         storage_account: Optional[str] = None,
         storage_key: Optional[str] = None,
     ):
-        self._session_id: Optional[int] = None
+        self._batch_id: Optional[str] = None
         self._storage_account = storage_account
         self._storage_key = storage_key
-        self._livy_endpoint = LIVY_ENDPOINT
-        self._session_data: Optional[Dict[str, Any]] = None
+        self._spark_api_url = CRUSOE_SPARK_API_URL
+        self._batch_data: Optional[Dict[str, Any]] = None
         self._credential = credential
         # Use CRUSOE environment variables for storage config
         self._storage_bucket = os.environ.get('CRUSOE_STORAGE_BUCKET')
@@ -70,46 +63,30 @@ class SynapseSparkSession:
         self._tenant_id = os.environ.get('CRUSOE_TENANT_ID')
         self._client_secret = os.environ.get('CRUSOE_CLIENT_SECRET')
         self._resource = os.environ.get('CRUSOE_RESOURCE', 'https://storage.azure.com/.default')
-        # Ensure required Azure AD token env vars are present (hybrid access)
-        self._tenant_id = os.environ.get('CRUSOE_TENANT_ID')
-        self._client_secret = os.environ.get('CRUSOE_CLIENT_SECRET')
-        self._resource = os.environ.get('CRUSOE_RESOURCE', 'https://storage.azure.com/.default')
 
     def connect(self) -> None:
-        """Create a Livy PySpark session in Synapse."""
-        if self._session_id is not None:
-            logger.info("Synapse session already active")
+        """Create a Crusoe Spark batch job."""
+        if self._batch_id is not None:
+            logger.info("Crusoe Spark batch job already active")
             return
 
-        # Acquire Azure AD token using ClientSecretCredential
-        if self._client_id and self._tenant_id and self._client_secret:
-            credential = ClientSecretCredential(
-                tenant_id=self._tenant_id,
-                client_id=self._client_id,
-                client_secret=self._client_secret
-            )
-            token = credential.get_token(self._resource)
-            auth_header = {"Authorization": f"Bearer {token.token}"}
-        else:
-            auth_header = {}
-
-        conf: Dict[str, str] = {}
         # Use CRUSOE S3-compatible storage config
         storage_bucket = self._storage_bucket
         storage_account = os.environ.get('CRUSOE_STORAGE_ACCOUNT')
         storage_key = self._storage_access_key
         if storage_account and storage_key and storage_bucket:
             # Configure S3-compatible storage for Spark via Hadoop config
-            conf["spark.hadoop.fs.s3a.access.key"] = storage_account
-            conf["spark.hadoop.fs.s3a.secret.key"] = storage_key
-            conf["spark.hadoop.fs.s3a.endpoint"] = f"{storage_bucket}.s3.amazonaws.com"
-            conf["spark.hadoop.fs.s3a.impl"] = "org.apache.hadoop.fs.s3a.S3AFileSystem"
+            conf = {
+                "spark.hadoop.fs.s3a.access.key": storage_account,
+                "spark.hadoop.fs.s3a.secret.key": storage_key,
+                "spark.hadoop.fs.s3a.endpoint": os.environ.get('CRUSOE_S3_ENDPOINT', 'https://s3.amazonaws.com'),
+                "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem"
+            }
             logger.info(f"Configured Spark for S3-compatible storage: {storage_bucket}")
         else:
             logger.warning("CRUSOE_STORAGE_ACCOUNT, CRUSOE_STORAGE_ACCESS_KEY, and CRUSOE_STORAGE_BUCKET must be set for S3-compatible storage")
 
         # Dynamic executor allocation: scale executors based on query complexity.
-        # Requires pool to have --enable-dynamic-exec (see deploy_azure.sh).
         # Max 5 executors so driver (2) + 5*2 = 12 vCores fits in 3 Small nodes.
         conf["spark.dynamicAllocation.enabled"] = "true"
         conf["spark.dynamicAllocation.minExecutors"] = "1"
@@ -131,84 +108,72 @@ class SynapseSparkSession:
             "kind": "pyspark"
         }
 
-        logger.info("Creating Synapse Spark session...")
+        logger.info("Creating Crusoe Spark batch job...")
         resp = requests.post(
-            f"{self._livy_endpoint}/sessions",
+            f"{self._spark_api_url}/batches",
             json=payload,
-            headers={"Content-Type": "application/json", **auth_header}
+            headers={"Content-Type": "application/json"}
         )
         resp.raise_for_status()
-        session_data = resp.json()
-        self._session_id = session_data.get("id")
-        self._session_data = session_data
-        logger.info(f"Synapse session created: id={self._session_id}")
+        batch_data = resp.json()
+        self._batch_id = batch_data.get("id")
+        self._batch_data = batch_data
+        logger.info(f"Crusoe Spark batch job created: id={self._batch_id}")
 
-        # Wait for session to be idle
-        self._wait_for_session_idle()
+        # Wait for batch to be idle
+        self._wait_for_batch_job_idle()
 
-    def _extract_session_error_detail(self, session_data: Dict[str, Any]) -> str:
-        """Extract error details from failed session for troubleshooting."""
+    def _extract_batch_error_detail(self, batch_data: Dict[str, Any]) -> str:
+        """Extract error details from failed batch job for troubleshooting."""
         details: List[str] = []
         try:
-            app_id = session_data.get("appId")
+            app_id = batch_data.get("appId")
             if app_id:
                 details.append(
-                    f"appId={app_id} (Synapse Studio: Monitor → Apache Spark applications)"
+                    f"appId={app_id} (Crusoe Spark UI: Monitor → Apache Spark applications)"
                 )
-            app_info = session_data.get("appInfo", {})
+            app_info = batch_data.get("appInfo", {})
             if app_info:
                 driver = app_info.get("driverLogUrl") or app_info.get("log")
                 if driver:
                     details.append(f"driverLogUrl={driver}")
-            state = session_data.get("state")
+            state = batch_data.get("state")
             if state and state.lower() in ("error", "dead", "killed"):
-                err_msg = session_data.get("log", [])
+                err_msg = batch_data.get("log", [])
                 if err_msg:
                     details.append(f"exception={'; '.join(err_msg[-3:])}")
         except Exception:
             pass
         return ". " + "; ".join(details) if details else ""
 
-    def _wait_for_session_idle(self) -> None:
-        """Wait indefinitely for the session to reach idle state. Large pools can take 5-10 min to cold start."""
+    def _wait_for_batch_idle(self) -> None:
+        """Wait indefinitely for the batch job to reach idle state. Large jobs can take 5-10 min to cold start."""
         start = time.time()
         last_log = 0.0
         while True:
-            # Use CRUSOE credentials for auth (if available)
-            auth_header = {}
-            if self._client_id and self._tenant_id and self._client_secret:
-                credential = ClientSecretCredential(
-                    tenant_id=self._tenant_id,
-                    client_id=self._client_id,
-                    client_secret=self._client_secret
-                )
-                token = credential.get_token(self._resource)
-                auth_header = {"Authorization": f"Bearer {token.token}"}
-            auth_header["Content-Type"] = "application/json"
-
             resp = requests.get(
-                f"{self._livy_endpoint}/sessions/{self._session_id}",
-                headers=auth_header
+                f"{self._spark_api_url}/batches/{self._batch_id}",
+                headers={"Content-Type": "application/json"}
             )
             resp.raise_for_status()
-            session_data = resp.json()
-            state = session_data.get("state", "").lower()
+            batch_data = resp.json()
+            state = batch_data.get("state", "").lower()
             if state in ("idle", "busy"):
-                logger.info(f"Session ready, state={state}")
+                logger.info(f"Batch job ready, state={state}")
                 return
             if state in ("dead", "error", "killed", "success"):
-                err_detail = self._extract_session_error_detail(session_data)
-                raise SynapseConnectionError(
-                    f"Session failed: state={state}{err_detail}"
+                err_detail = self._extract_batch_error_detail(batch_data)
+                raise SparkBatchJobError(
+                    f"Batch job failed: state={state}{err_detail}"
                 )
-            # Log every 30s so user sees progress (Large pool cold start can take minutes)
+            # Log every 30s so user sees progress (Large job cold start can take minutes)
             now = time.time()
             if now - last_log >= 30:
                 elapsed = int(now - start)
-                logger.info(f"Session state: {state}, waiting... ({elapsed}s elapsed)")
+                logger.info(f"Batch job state: {state}, waiting... ({elapsed}s elapsed)")
                 last_log = now
             else:
-                logger.debug(f"Session state: {state}, waiting...")
+                logger.debug(f"Batch job state: {state}, waiting...")
             time.sleep(STATEMENT_POLL_INTERVAL_SEC)
 
     def _execute_statement(
@@ -217,29 +182,15 @@ class SynapseSparkSession:
         kind: str = "pyspark",
     ) -> Dict[str, Any]:
         """Execute code and return the statement result."""
-        if self._session_id is None:
-            raise SynapseConnectionError("Not connected to Synapse")
-
-        # Use CRUSOE credentials for auth (if available)
-        auth_header = {}
-        if self._client_id and self._tenant_id and self._client_secret:
-            credential = ClientSecretCredential(
-                tenant_id=self._tenant_id,
-                client_id=self._client_id,
-                client_secret=self._client_secret
-            )
-            token = credential.get_token(self._resource)
-            auth_header = {"Authorization": f"Bearer {token.token}"}
-        auth_header["Content-Type"] = "application/json"
-
+        # Use CRUSOE Spark Batch API directly (no Livy sessions)
         payload = {
             "code": code,
             "kind": kind
         }
         resp = requests.post(
-            f"{self._livy_endpoint}/sessions/{self._session_id}/statements",
+            f"{self._spark_api_url}/batches/{self._batch_id}/statements",
             json=payload,
-            headers=auth_header
+            headers={"Content-Type": "application/json"}
         )
         resp.raise_for_status()
         stmt_data = resp.json()
@@ -249,8 +200,8 @@ class SynapseSparkSession:
         start = time.time()
         while time.time() - start < STATEMENT_MAX_WAIT_SEC:
             resp = requests.get(
-                f"{self._livy_endpoint}/sessions/{self._session_id}/statements/{stmt_id}",
-                headers=auth_header
+                f"{self._spark_api_url}/batches/{self._batch_id}/statements/{stmt_id}",
+                headers={"Content-Type": "application/json"}
             )
             resp.raise_for_status()
             stmt_status = resp.json()
@@ -270,13 +221,13 @@ class SynapseSparkSession:
                         err_msg = str(data.get("text/plain", data))
                     else:
                         err_msg = str(data)
-                raise SynapseExecutionError(f"Statement failed: {err_msg}")
+                raise SparkBatchJobError(f"Statement failed: {err_msg}")
 
             time.sleep(STATEMENT_POLL_INTERVAL_SEC)
 
-        raise SynapseExecutionError("Statement timed out")
+        raise SparkBatchJobError("Statement timed out")
 
-    def execute_sql(
+    def execute_spark_sql(
         self,
         query: str,
         max_rows: int = 1000,
@@ -293,9 +244,9 @@ import json
 result = {{"columns": df.columns, "data": [row.asDict() for row in rows]}}
 print(json.dumps(result))
 '''
-        output = self._execute_statement(code, kind="pyspark")
+        output = self._execute_batch_statement(code, kind="pyspark")
 
-        # Extract text from Livy output
+        # Extract text from Crusoe Spark Batch statement output
         if isinstance(output, dict):
             data = output.get("data", {})
             if isinstance(data, dict):
@@ -321,7 +272,7 @@ print(json.dumps(result))
             logger.warning(f"Could not parse statement output as JSON: {text[:200]}")
             return {"data": [], "columns": [], "row_count": 0}
 
-    def load_parquet_and_create_view(
+    def load_s3_parquet_and_create_view(
         self,
         pattern: str,
         view_name: str,
@@ -401,13 +352,13 @@ df.createOrReplaceTempView("{view_name}")
 print("OK")
 '''
         try:
-            self._execute_statement(code, kind="pyspark")
+            self._execute_batch_statement(code, kind="pyspark")
             return True
-        except SynapseExecutionError as e:
+        except SparkBatchJobError as e:
             logger.warning(f"Failed to load {pattern} into {view_name}: {e}")
             return False
 
-    def load_csv_and_create_view(
+    def load_s3_csv_and_create_view(
         self,
         rel_path: str,
         view_name: str,
@@ -420,42 +371,30 @@ df.createOrReplaceTempView("{view_name}")
 print("OK")
 '''
         try:
-            self._execute_statement(code, kind="pyspark")
+            self._execute_batch_statement(code, kind="pyspark")
             return True
-        except SynapseExecutionError as e:
+        except SparkBatchJobError as e:
             logger.warning(f"Failed to load {rel_path} into {view_name}: {e}")
             return False
 
-    def close(self) -> None:
-        """Terminate the Livy session."""
-        if self._session_id is not None:
+    def terminate(self) -> None:
+        """Terminate the Crusoe Spark batch job."""
+        if self._batch_id is not None:
             try:
-                # Use CRUSOE credentials for auth (if available)
-                auth_header = {}
-                if self._client_id and self._tenant_id and self._client_secret:
-                    credential = ClientSecretCredential(
-                        tenant_id=self._tenant_id,
-                        client_id=self._client_id,
-                        client_secret=self._client_secret
-                    )
-                    token = credential.get_token(self._resource)
-                    auth_header = {"Authorization": f"Bearer {token.token}"}
-                auth_header["Content-Type"] = "application/json"
-
                 resp = requests.delete(
-                    f"{self._livy_endpoint}/sessions/{self._session_id}",
-                    headers=auth_header
+                    f"{self._spark_api_url}/batches/{self._batch_id}",
+                    headers={"Content-Type": "application/json"}
                 )
                 resp.raise_for_status()
-                logger.info("Synapse session closed")
+                logger.info("Crusoe Spark batch job terminated")
             except Exception as e:
-                logger.warning(f"Error closing session: {e}")
-            self._session_id = None
+                logger.warning(f"Error terminating batch job: {e}")
+            self._batch_id = None
 
 
-def create_synapse_session(settings: Any) -> SynapseSparkSession:
+def create_spark_batch_job(settings: Any) -> SynapseSparkSession:
     """
-    Create and connect a Synapse Spark session.
+    Create and connect a Crusoe Spark batch job.
     Requires: synapse_workspace_name, synapse_spark_pool_name, data_path.
     """
     workspace = getattr(settings, "synapse_workspace_name", None)
@@ -463,13 +402,13 @@ def create_synapse_session(settings: Any) -> SynapseSparkSession:
     data_path = getattr(settings, "data_path", "./src_data")
 
     if not workspace or not pool:
-        raise SynapseConnectionError(
+        raise SparkBatchJobError(
             "CRUSOE_WORKSPACE and CRUSOE_SPARK_POOL are required"
         )
     # CRUSOE uses S3-compatible storage; no abfss:// requirement
     # Use CRUSOE environment variables for storage config
-    storage_account = os.environ.get('CRUSOE_STORAGE_ACCOUNT')
-    storage_key = os.environ.get('CRUSOE_STORAGE_ACCESS_KEY')
+    storage_account = os.environ.get('CRUSOE_STORAGE_ACCESS_KEY')
+    storage_key = os.environ.get('CRUSOE_STORAGE_SECRET_KEY')
     storage_bucket = os.environ.get('CRUSOE_STORAGE_BUCKET')
 
     session = SynapseSparkSession(
@@ -488,3 +427,4 @@ def create_synapse_session(settings: Any) -> SynapseSparkSession:
     session._resource = os.environ.get('CRUSOE_RESOURCE', 'https://storage.azure.com/.default')
     session.connect()
     return session
+"""

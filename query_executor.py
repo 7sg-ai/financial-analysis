@@ -1,5 +1,5 @@
 """
-Query execution engine for Spark SQL via Livy-compatible endpoint (e.g., EMR Serverless or self-hosted Spark Thrift Server)
+Query execution engine for Spark SQL via Crusoe Spark batch API
 Executes queries remotely via HTTP; no local Spark.
 """
 from typing import Dict, List, Any, Optional, TYPE_CHECKING
@@ -21,16 +21,21 @@ class QueryExecutionError(Exception):
     pass
 
 
+class SparkBatchJobError(Exception):
+    """Custom exception for Crusoe Spark batch job errors"""
+    pass
+
+
 class QueryExecutor:
     """
-    Executes Spark SQL queries via Livy-compatible endpoint.
+    Executes Spark SQL queries via Crusoe Spark batch API.
     """
 
-    def __init__(self, session: "SynapseSparkSession", max_result_rows: int = 1000):
+    def __init__(self, session: "SparkBatchJobConfig", max_result_rows: int = 1000):
         self.session = session
         self.max_result_rows = max_result_rows
         self._query_history: List[Dict[str, Any]] = []
-        logger.info(f"QueryExecutor initialized (Livy) max_result_rows={max_result_rows}")
+        logger.info(f"QueryExecutor initialized (Crusoe Spark) max_result_rows={max_result_rows}")
 
     def execute_query(
         self,
@@ -39,18 +44,16 @@ class QueryExecutor:
         max_rows: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Execute SQL via Livy-compatible endpoint and return results.
+        Execute SQL via Crusoe Spark batch API and return results.
 
         Args:
             query: SQL query
-            return_dataframe: Ignored (no local DataFrame with Livy)
+            return_dataframe: Ignored (no local DataFrame with Crusoe Spark)
             max_rows: Row limit (default from constructor)
 
         Returns:
             Dict with success, data, columns, row_count, execution_time_ms, error
         """
-        from synapse_client import SynapseExecutionError
-
         start = datetime.now()
         limit = max_rows if max_rows is not None else self.max_result_rows
         result = {
@@ -63,8 +66,8 @@ class QueryExecutor:
         }
 
         try:
-            logger.info(f"Executing query via Livy: {query[:100]}...")
-            r = self._execute_sql_livy(query, max_rows=limit)
+            logger.info(f"Executing query via Crusoe Spark: {query[:100]}...")
+            r = self._execute_batch_statement(query, max_rows=limit)
             result["data"] = r.get("data", [])
             result["columns"] = r.get("columns", [])
             result["row_count"] = r.get("row_count", len(result["data"]))
@@ -72,7 +75,7 @@ class QueryExecutor:
             result["success"] = True
             self._add_to_history(query, True, result["execution_time_ms"], result["row_count"])
             logger.info(f"Query succeeded: {result['row_count']} rows, {result['execution_time_ms']}ms")
-        except SynapseExecutionError as e:
+        except SparkBatchJobError as e:
             result["error"] = str(e)
             result["error_trace"] = traceback.format_exc()
             result["execution_time_ms"] = int((datetime.now() - start).total_seconds() * 1000)
@@ -87,55 +90,59 @@ class QueryExecutor:
 
         return result
 
-    def _execute_sql_livy(self, query: str, max_rows: int = 1000) -> Dict[str, Any]:
-        """Execute SQL via Livy-compatible endpoint using requests.post()."""
-        livy_endpoint = os.environ.get("LIVY_ENDPOINT")
-        if not livy_endpoint:
-            raise RuntimeError("LIVY_ENDPOINT environment variable not set")
+    def _execute_batch_statement(self, query: str, max_rows: int = 1000) -> Dict[str, Any]:
+        """Execute SQL via Crusoe Spark batch API using requests.post()."""
+        spark_api_url = os.environ.get("CRUSOE_SPARK_API_URL")
+        if not spark_api_url:
+            raise RuntimeError("CRUSOE_SPARK_API_URL environment variable not set")
 
-        # Submit statement to Livy session
-        url = f"{livy_endpoint}/sessions/{self.session.session_id}/statements"
+        # Submit batch job to Crusoe Spark
+        url = f"{spark_api_url}/batches"
         payload = {
-            "code": query,
-            "kind": "sql"
+            "name": f"query_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            "file": "local:///opt/spark/app/query.py",
+            "className": "com.crusoe.spark.QueryRunner",
+            "args": [query],
+            "conf": {
+                "spark.sql.adaptive.enabled": "true",
+                "spark.sql.adaptive.coalescePartitions.enabled": "true"
+            }
         }
         
         # Prepare auth headers if credentials are available
         headers = {"Content-Type": "application/json"}
-        livy_username = os.environ.get("LIVY_USERNAME")
-        livy_password = os.environ.get("LIVY_PASSWORD")
-        if livy_username and livy_password:
-            headers["Authorization"] = f"Basic {requests.auth._basic_auth_str(livy_username, livy_password)}"
+        spark_api_key = os.environ.get("CRUSOE_SPARK_API_KEY")
+        if spark_api_key:
+            headers["Authorization"] = f"Bearer {spark_api_key}"
 
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=30)
             response.raise_for_status()
-            statement_data = response.json()
+            batch_data = response.json()
             
-            # Poll for completion
-            statement_id = statement_data.get("id")
-            if statement_id is None:
-                raise RuntimeError("No statement ID returned from Livy")
+            # Get batch ID
+            batch_id = batch_data.get("id")
+            if batch_id is None:
+                raise RuntimeError("No batch ID returned from Crusoe Spark")
             
-            # Poll for statement completion
+            # Poll for batch completion
             import time
             poll_interval = 1  # seconds
             max_wait = 300  # seconds
             elapsed = 0
             while elapsed < max_wait:
                 time.sleep(poll_interval)
-                poll_url = f"{livy_endpoint}/sessions/{self.session.session_id}/statements/{statement_id}"
+                poll_url = f"{spark_api_url}/batches/{batch_id}"
                 poll_response = requests.get(poll_url, headers=headers, timeout=10)
                 poll_response.raise_for_status()
                 poll_data = poll_response.json()
                 state = poll_data.get("state")
                 
-                if state == "finished":
+                if state == "success":
+                    # Extract output from batch result
                     output = poll_data.get("output", {})
-                    if output.get("status") == "ok":
-                        data = output.get("data", {})
-                        # Extract result data (Spark SQL typically returns row-oriented data)
-                        result_data = data.get("application/vnd.apache.spark.dataframe+json", {})
+                    if output:
+                        result_data = output.get("data", {})
                         if isinstance(result_data, dict) and "schema" in result_data and "data" in result_data:
                             # Handle structured response
                             columns = [field["name"] for field in result_data["schema"]["fields"]]
@@ -167,22 +174,21 @@ class QueryExecutor:
                                 "columns": ["result"],
                                 "row_count": 1
                             }
-                    elif output.get("status") == "error":
-                        raise SynapseExecutionError(f"Livy statement error: {output.get('evalue', 'Unknown error')}")
                     else:
-                        raise SynapseExecutionError(f"Unexpected output status: {output.get('status')}")
-                elif state in ["error", "cancelled", "dead"]:
-                    raise SynapseExecutionError(f"Livy statement failed with state: {state}")
+                        raise SparkBatchJobError("No output data in successful batch job")
+                elif state in ["failed", "killed", "dead"]:
+                    error_message = poll_data.get("appInfo", {}).get("error", "Unknown error")
+                    raise SparkBatchJobError(f"Batch job failed with state: {state}, error: {error_message}")
                 
                 elapsed += poll_interval
             
-            raise SynapseExecutionError(f"Statement execution timed out after {max_wait} seconds")
+            raise SparkBatchJobError(f"Batch job execution timed out after {max_wait} seconds")
             
         except requests.exceptions.RequestException as e:
-            raise SynapseExecutionError(f"HTTP request failed: {str(e)}")
+            raise SparkBatchJobError(f"HTTP request failed: {str(e)}")
 
     def execute_and_analyze(self, query: str) -> Dict[str, Any]:
-        """Execute query; analysis simplified for Livy (no DataFrame)."""
+        """Execute query; analysis simplified for Crusoe Spark (no DataFrame)."""
         result = self.execute_query(query)
         if result["success"] and result.get("data"):
             result["analysis"] = {
@@ -224,7 +230,7 @@ class QueryExecutor:
     def get_query_plan(self, query: str) -> str:
         """Get execution plan via EXPLAIN."""
         try:
-            r = self._execute_sql_livy(f"EXPLAIN {query}", max_rows=100)
+            r = self._execute_batch_statement(f"EXPLAIN {query}", max_rows=100)
             lines = []
             for row in r.get("data", []):
                 lines.append(str(row))
@@ -244,7 +250,7 @@ class QueryExecutor:
         return h[-limit:]
 
     def clear_cache(self) -> None:
-        """No-op for Livy (compatibility)."""
+        """No-op for Crusoe Spark (compatibility)."""
         pass
 
     def _add_to_history(

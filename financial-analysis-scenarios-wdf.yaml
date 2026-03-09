@@ -109,8 +109,8 @@ secrets:
     injectAs: env
     envVar: LANGFUSE_HOST
     externalRef:
-      provider: langfuse_host
-      key: azure-resource-group
+      provider: azure-keyvault
+      key: langfuse-host
       vaultUrl: https://wdf-secret-manager.vault.azure.net/
 dataSources:
   inputs:
@@ -131,7 +131,7 @@ scenarios:
           regions:
           - eastus2
           image:
-            registry: uvfinancialacr.azurecr.io
+            registry: financialanalysisacr.azurecr.io
             repository: financial-analysis-api
             tag: latest
           env:
@@ -142,11 +142,15 @@ scenarios:
           - name: LOG_LEVEL
             value: INFO
           - name: DATA_PATH
-            value: ./src_data
+            value: abfss://data@financialanalysissynapse.dfs.core.windows.net/taxi-data/
+          - name: USE_LOCAL_SPARK
+            value: 'false'
           - name: AZURE_OPENAI_DEPLOYMENT_NAME
             value: gpt-5-mini
           - name: AZURE_OPENAI_API_VERSION
             value: 2024-02-15-preview
+          - name: AZURE_RESOURCE_GROUP
+            value: rg-financial-analysis
           envFromSecretRefs:
           - azure-openai-endpoint
           - azure-openai-api-key
@@ -180,7 +184,7 @@ scenarios:
           regions:
           - eastus2
           image:
-            registry: uvfinancialacr.azurecr.io
+            registry: financialanalysisacr.azurecr.io
             repository: financial-analysis-streamlit
             tag: latest
           env:
@@ -227,13 +231,13 @@ scenarios:
           financial-analysis-api:
             runtime:
               image:
-                registry: uvfinancialacr.azurecr.io
+                registry: financialanalysisacr.azurecr.io
                 repository: financial-analysis-api
                 tag: latest
           financial-analysis-ui:
             runtime:
               image:
-                registry: uvfinancialacr.azurecr.io
+                registry: financialanalysisacr.azurecr.io
                 repository: financial-analysis-streamlit
                 tag: latest
   alternates:
@@ -250,7 +254,7 @@ scenarios:
           regions:
           - eastus2
           image:
-            registry: uvfinancialacr.azurecr.io
+            registry: financialanalysisacr.azurecr.io
             repository: financial-analysis-api
             tag: latest
           env:
@@ -261,11 +265,15 @@ scenarios:
           - name: LOG_LEVEL
             value: INFO
           - name: DATA_PATH
-            value: ./src_data
+            value: abfss://data@financialanalysissynapse.dfs.core.windows.net/taxi-data/
+          - name: USE_LOCAL_SPARK
+            value: 'false'
           - name: AZURE_OPENAI_DEPLOYMENT_NAME
             value: gpt-4.1-mini
           - name: AZURE_OPENAI_API_VERSION
             value: 2024-02-15-preview
+          - name: AZURE_RESOURCE_GROUP
+            value: rg-financial-analysis
           envFromSecretRefs:
           - azure-openai-endpoint
           - azure-openai-api-key
@@ -298,7 +306,7 @@ scenarios:
           regions:
           - eastus2
           image:
-            registry: uvfinancialacr.azurecr.io
+            registry: financialanalysisacr.azurecr.io
             repository: financial-analysis-streamlit
             tag: latest
           env:
@@ -332,8 +340,8 @@ scenarios:
         provider: azure
         region: eastus2
         tdfRef: azure-east-fa-alt
-        cluster: financial-analysis-alt-env-eastus2
-        namespace: financial-analysis-alt
+        cluster: financial-analysis-env-eastus2
+        namespace: financial-analysis
       identityRef: azure-managed-identity://financial-analysis
       secretStores:
         primary: wdf-secret-manager
@@ -345,7 +353,7 @@ scenarios:
           financial-analysis-api:
             runtime:
               image:
-                registry: uvfinancialacr.azurecr.io
+                registry: financialanalysisacr.azurecr.io
                 repository: financial-analysis-api
                 tag: latest
               env:
@@ -356,6 +364,6 @@ scenarios:
           financial-analysis-ui:
             runtime:
               image:
-                registry: uvfinancialacr.azurecr.io
+                registry: financialanalysisacr.azurecr.io
                 repository: financial-analysis-streamlit
                 tag: latest

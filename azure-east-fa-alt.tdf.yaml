@@ -5,9 +5,8 @@ metadata:
   displayName: Azure East - Financial Analysis Alternate (gpt-4.1-mini)
   description:
     Azure target in eastus2 for deploying the financial-analysis alternate
-    scenario on Azure Container Apps using gpt-4.1-mini. Shares the same ACR
-    and Key Vault as the native scenario but uses a separate Container Apps
-    environment and resource group for isolation.
+    scenario on Azure Container Apps using gpt-4.1-mini. Shares the same
+    resource group, ACR, Synapse, Storage, and Key Vault as the native scenario.
   tags:
     provider: azure
     geo: us
@@ -33,25 +32,29 @@ target:
         supportsScaleToZero: true
         supportsDapr: true
       defaults:
-        resourceGroup: financial-analysis-alt-rg
+        resourceGroup: rg-financial-analysis
         location: eastus2
-        environment: financial-analysis-alt-env-eastus2
+        environment: financial-analysis-env-eastus2
         logAnalyticsWorkspace: financial-analysis-logs
 
     - name: acr
       type: container-registry
       providerService: Azure Container Registry
       endpoints:
-        registry: uvfinancialacr.azurecr.io
+        registry: financialanalysisacr.azurecr.io
       defaults:
-        registryName: uvfinancialacr
-        resourceGroup: financial-analysis-alt-rg
+        registryName: financialanalysisacr
+        resourceGroup: rg-financial-analysis
 
     - name: synapse
       type: spark
       providerService: Azure Synapse Spark
       endpoints:
-        workspace: https://sherpa-synapse-ws.dev.azuresynapse.net
+        workspace: https://financial-analysis-synapse.dev.azuresynapse.net
+      defaults:
+        workspaceName: financial-analysis-synapse
+        sparkPoolName: sparkpool
+        resourceGroup: rg-financial-analysis
       capabilities:
         supportsPrivateEndpoints: true
 
@@ -59,9 +62,20 @@ target:
       type: object-store
       providerService: ADLS Gen2
       endpoints:
-        dfs: https://ste2qdqwb6pvdzg.dfs.core.windows.net
+        dfs: https://financialanalysissynapse.dfs.core.windows.net
+      defaults:
+        storageAccountName: financialanalysissynapse
+        containerName: data
+        resourceGroup: rg-financial-analysis
       capabilities:
         supportsPrivateEndpoints: true
+
+    - name: openai
+      type: ai-service
+      providerService: Azure OpenAI
+      defaults:
+        accountName: financial-analysis-openai
+        resourceGroup: rg-financial-analysis
 
     - name: keyvault
       type: secrets
@@ -74,6 +88,9 @@ target:
     - name: managed-identity
       type: identity
       providerService: Managed Identity
+      defaults:
+        identityName: financial-analysis-api-identity
+        resourceGroup: rg-financial-analysis
 
     - name: observability
       type: observability
@@ -81,11 +98,11 @@ target:
 
   infrastructure:
     containerAppsEnvironment:
-      name: financial-analysis-alt-env-eastus2
-      resourceGroup: financial-analysis-alt-rg
+      name: financial-analysis-env-eastus2
+      resourceGroup: rg-financial-analysis
       location: eastus2
     containerRegistry:
-      name: uvfinancialacr
+      name: financialanalysisacr
       service: acr
     secretStores:
       - name: wdf-secret-manager

@@ -18,6 +18,9 @@ pydantic-settings==2.1.0
 streamlit==1.29.0
 plotly==5.17.0
 
+# Observability
+langfuse>=3.14.0,<4.0.0
+
 # Utilities
 python-dotenv==1.0.0
 python-multipart==0.0.6

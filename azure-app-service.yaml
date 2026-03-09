@@ -79,6 +79,12 @@ spec:
           value: "8501"
         - name: STREAMLIT_HOST
           value: "0.0.0.0"
+        - name: LANGFUSE_SECRET_KEY
+          value: "sk-lf-f708968e-5023-41f6-a4b4-da6b9c6f01c8"
+        - name: LANGFUSE_PUBLIC_KEY
+          value: "pk-lf-b3bc8526-3a13-44ad-be08-78de2f1f89ea"
+        - name: LANGFUSE_BASE_URL
+          value: "https://langfuse.7sg.ai"
         resources:
           requests:
             memory: "4Gi"

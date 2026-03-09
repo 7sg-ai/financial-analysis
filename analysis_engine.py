@@ -13,6 +13,17 @@ from query_executor import QueryExecutor
 from response_formatter import AnalysisResponse, ResponseFormatter
 from config import Settings
 
+try:
+    from langfuse.decorators import observe
+except ImportError:
+    def observe(*args, **kwargs):
+        """No-op decorator when langfuse is not installed."""
+        def decorator(fn):
+            return fn
+        if args and callable(args[0]):
+            return args[0]
+        return decorator
+
 logger = logging.getLogger(__name__)
 
 
@@ -85,6 +96,7 @@ class FinancialAnalysisEngine:
             logger.info("Data views refreshed")
         return success
     
+    @observe(name="analyze")
     def analyze(
         self,
         question: str,
@@ -237,6 +249,7 @@ class FinancialAnalysisEngine:
                 metadata={'error': str(e)}
             )
     
+    @observe(name="execute_custom_query")
     def execute_custom_query(
         self,
         query: str,
@@ -320,6 +333,7 @@ class FinancialAnalysisEngine:
                 metadata={'error': str(e)}
             )
     
+    @observe(name="get_suggestions")
     def get_suggestions(self, question: str) -> List[str]:
         """
         Get related question suggestions

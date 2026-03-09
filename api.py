@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 import logging
+import os
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -23,6 +24,42 @@ logger = logging.getLogger(__name__)
 
 # Global engine instance
 engine: Optional[FinancialAnalysisEngine] = None
+
+# LangFuse instance (set during startup if configured)
+_langfuse_instance = None
+
+
+def _initialize_langfuse(settings) -> None:
+    """Initialize LangFuse if credentials are configured."""
+    global _langfuse_instance
+    if not (settings.langfuse_secret_key and settings.langfuse_public_key):
+        logger.info("LangFuse credentials not configured, skipping initialization")
+        return
+
+    os.environ["LANGFUSE_SECRET_KEY"] = settings.langfuse_secret_key
+    os.environ["LANGFUSE_PUBLIC_KEY"] = settings.langfuse_public_key
+    if settings.langfuse_base_url:
+        os.environ["LANGFUSE_HOST"] = settings.langfuse_base_url
+
+    try:
+        from langfuse import Langfuse
+        _langfuse_instance = Langfuse()
+        logger.info(
+            f"LangFuse initialized (host={settings.langfuse_base_url or 'default'})"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to initialize LangFuse: {e}")
+
+
+def _shutdown_langfuse() -> None:
+    """Flush and shutdown LangFuse."""
+    global _langfuse_instance
+    if _langfuse_instance is not None:
+        try:
+            _langfuse_instance.flush()
+            logger.info("LangFuse flushed successfully")
+        except Exception as e:
+            logger.warning(f"Error flushing LangFuse: {e}")
 
 
 async def poll_for_data_files():
@@ -51,6 +88,8 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     logger.info(f"DATA_PATH={settings.data_path}")
     
+    _initialize_langfuse(settings)
+    
     while True:
         try:
             engine = FinancialAnalysisEngine(settings)
@@ -74,6 +113,7 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down Financial Analysis API...")
+    _shutdown_langfuse()
     if engine:
         engine.shutdown()
 

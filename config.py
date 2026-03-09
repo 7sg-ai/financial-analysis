@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     azure_subscription_id: str = Field(..., env="AZURE_SUBSCRIPTION_ID")
     azure_resource_group: str = Field(..., env="AZURE_RESOURCE_GROUP")
     
+    # LangFuse Observability Configuration
+    langfuse_secret_key: Optional[str] = Field(default=None, env="LANGFUSE_SECRET_KEY")
+    langfuse_public_key: Optional[str] = Field(default=None, env="LANGFUSE_PUBLIC_KEY")
+    langfuse_base_url: Optional[str] = Field(default=None, env="LANGFUSE_BASE_URL")
+    
     # Azure Storage Configuration
     azure_storage_account_name: Optional[str] = Field(default=None, env="AZURE_STORAGE_ACCOUNT_NAME")
     azure_storage_account_key: Optional[str] = Field(default=None, env="AZURE_STORAGE_ACCOUNT_KEY")

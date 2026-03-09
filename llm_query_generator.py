@@ -3,12 +3,27 @@ LLM-powered query generation module using Azure OpenAI
 Converts natural language questions into Spark SQL queries
 """
 from typing import Optional, Dict, List, Any, Literal
-from openai import AzureOpenAI
 import json
 import logging
 import re
 from tenacity import retry, stop_after_attempt, wait_exponential
 from schemas import get_schema_context
+
+try:
+    from langfuse.openai import AzureOpenAI
+    from langfuse.decorators import observe
+    _langfuse_available = True
+except ImportError:
+    from openai import AzureOpenAI
+    _langfuse_available = False
+
+    def observe(*args, **kwargs):
+        """No-op decorator when langfuse is not installed."""
+        def decorator(fn):
+            return fn
+        if args and callable(args[0]):
+            return args[0]
+        return decorator
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +77,7 @@ class QueryGenerator:
         
         logger.info(f"QueryGenerator initialized with deployment: {deployment_name}")
     
+    @observe(name="generate_sql_query")
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10)
@@ -182,6 +198,7 @@ class QueryGenerator:
             'warnings': warnings
         }
     
+    @observe(name="refine_sql_query")
     def refine_query(
         self,
         original_question: str,
@@ -260,6 +277,7 @@ Return your response as JSON with the following structure:
             logger.error(f"Error refining query: {e}")
             raise
     
+    @observe(name="suggest_related_queries")
     def suggest_related_queries(
         self,
         user_question: str,
@@ -411,6 +429,7 @@ class NarrativeGenerator:
         
         logger.info("NarrativeGenerator initialized")
     
+    @observe(name="generate_narrative")
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10)

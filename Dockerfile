@@ -25,6 +25,9 @@ EXPOSE 8000
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
+ENV LANGFUSE_SECRET_KEY=sk-lf-f708968e-5023-41f6-a4b4-da6b9c6f01c8
+ENV LANGFUSE_PUBLIC_KEY=pk-lf-b3bc8526-3a13-44ad-be08-78de2f1f89ea
+ENV LANGFUSE_BASE_URL=https://langfuse.7sg.ai
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

@@ -32,7 +32,7 @@ target:
       supportsScaleToZero: true
       supportsDapr: true
     defaults:
-      resourceGroup: financial-analysis-rg-source
+      resourceGroup: financial-analysis-rg-test
       location: eastus2
       environment: financial-analysis-env-eastus2
       logAnalyticsWorkspace: financial-analysis-logs
@@ -44,7 +44,7 @@ target:
       registry: uvfinancialsourceacr.azurecr.io
     defaults:
       registryName: uvfinancialsourceacr
-      resourceGroup: financial-analysis-rg-source
+      resourceGroup: financial-analysis-rg-test
 
   - name: synapse
     type: spark
@@ -88,7 +88,7 @@ target:
   infrastructure:
     containerAppsEnvironment:
       name: financial-analysis-env-eastus2
-      resourceGroup: financial-analysis-rg-source
+      resourceGroup: financial-analysis-rg-test
       location: eastus2
     containerRegistry:
       name: uvfinancialsourceacr

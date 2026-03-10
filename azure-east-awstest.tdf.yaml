@@ -1,0 +1,98 @@
+apiVersion: tdf.7sg.ai/v1
+kind: TargetDefinition
+metadata:
+  name: azure-east-awstest
+  displayName: Azure East - Financial Analysis Native (awstest clone)
+  description: >-
+    Azure target in eastus2 for deploying the financial-analysis native scenario
+    (gpt-4.1-mini) on Azure Container Apps with ACR, Key Vault, Synapse Spark,
+    and ADLS Gen2. Cloned for rg-financial-analysis-aws-test.
+  tags:
+    provider: azure
+    geo: us
+    tier: native
+    platform: container-apps
+target:
+  provider: azure
+  regions:
+  - eastus2
+  geography:
+    continent: na
+    country: us
+    zoneGroup: us-central
+  networking:
+    defaultNetworkPolicy: private
+  services:
+  - name: container-apps
+    type: container-platform
+    providerService: Azure Container Apps
+    capabilities:
+      supportsManagedIdentity: true
+      supportsCustomDomains: true
+      supportsScaleToZero: true
+      supportsDapr: true
+    defaults:
+      resourceGroup: rg-financial-analysis-aws-test
+      location: eastus2
+      environment: financial-analysis-awstest-env-eastus2
+      logAnalyticsWorkspace: financial-analysis-logs-awstest
+
+  - name: acr
+    type: container-registry
+    providerService: Azure Container Registry
+    endpoints:
+      registry: financialanalysisacrawstest.azurecr.io
+    defaults:
+      registryName: financialanalysisacrawstest
+      resourceGroup: rg-financial-analysis-aws-test
+
+  - name: synapse
+    type: spark
+    providerService: Azure Synapse Spark
+    endpoints:
+      workspace: https://financial-analysis-synapse-awstest.dev.azuresynapse.net
+    defaults:
+      workspaceName: financial-analysis-synapse-awstest
+      sparkPoolName: sparkpool
+      resourceGroup: rg-financial-analysis-aws-test
+    capabilities:
+      supportsPrivateEndpoints: true
+
+  - name: adls
+    type: object-store
+    providerService: ADLS Gen2
+    endpoints:
+      dfs: https://financialanalysissynapseawstest.dfs.core.windows.net
+    defaults:
+      storageAccountName: financialanalysissynapseawstest
+      container: data
+    capabilities:
+      supportsPrivateEndpoints: true
+
+  - name: keyvault
+    type: secrets
+    providerService: Azure Key Vault
+    endpoints:
+      vault: https://wdf-secret-manager-awstest.vault.azure.net/
+    capabilities:
+      supportsPrivateEndpoints: true
+
+  - name: managed-identity
+    type: identity
+    providerService: Managed Identity
+
+  - name: observability
+    type: observability
+    providerService: Azure Monitor / Log Analytics
+
+  infrastructure:
+    containerAppsEnvironment:
+      name: financial-analysis-awstest-env-eastus2
+      resourceGroup: rg-financial-analysis-aws-test
+      location: eastus2
+    containerRegistry:
+      name: financialanalysisacrawstest
+      service: acr
+    secretStores:
+    - name: wdf-secret-manager-awstest
+      service: keyvault

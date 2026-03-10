@@ -6,6 +6,12 @@ metadata:
     native (gpt-5-mini) and alternate (gpt-4.1-mini) on Azure Container Apps.
   tags:
     env: prod
+source:
+  repo: https://github.com/7sg-ai/financial-analysis
+  ref: main
+  dockerfiles:
+    financial-analysis-api: Dockerfile
+    financial-analysis-ui: Dockerfile.streamlit
 security:
   network:
     defaultExposure: private

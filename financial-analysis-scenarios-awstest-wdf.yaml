@@ -7,6 +7,12 @@ metadata:
     Cloned for rg-financial-analysis-aws-test.
   tags:
     env: prod
+source:
+  repo: https://github.com/7sg-ai/financial-analysis
+  ref: main
+  dockerfiles:
+    financial-analysis-api: Dockerfile
+    financial-analysis-ui: Dockerfile.streamlit
 security:
   network:
     defaultExposure: private

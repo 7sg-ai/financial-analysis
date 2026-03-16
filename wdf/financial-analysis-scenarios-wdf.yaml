@@ -1,0 +1,443 @@
+apiVersion: wdf.7sg.ai/v2
+kind: WorkloadDefinition
+metadata:
+  name: financial-analysis-scenarios
+  description: FastAPI + Streamlit financial analysis app with two scenarios -
+    native (gpt-4.1-mini) and alternate (gpt-4.1-nano) on Azure Container Apps.
+  tags:
+    env: prod
+security:
+  network:
+    defaultExposure: private
+  identity:
+    workloadIdentity: true
+secrets:
+  provider: azureKeyVault
+  secretRefs:
+  - name: azure-openai-endpoint
+    injectAs: env
+    envVar: AZURE_OPENAI_ENDPOINT
+    externalRef:
+      provider: azure-keyvault
+      key: azure-openai-endpoint
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-openai-api-key
+    injectAs: env
+    envVar: AZURE_OPENAI_API_KEY
+    externalRef:
+      provider: azure-keyvault
+      key: azure-openai-api-key
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-synapse-workspace-name
+    injectAs: env
+    envVar: AZURE_SYNAPSE_WORKSPACE_NAME
+    externalRef:
+      provider: azure-keyvault
+      key: azure-synapse-workspace-name
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-synapse-spark-pool-name
+    injectAs: env
+    envVar: AZURE_SYNAPSE_SPARK_POOL_NAME
+    externalRef:
+      provider: azure-keyvault
+      key: azure-synapse-spark-pool-name
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-storage-account-name
+    injectAs: env
+    envVar: AZURE_STORAGE_ACCOUNT_NAME
+    externalRef:
+      provider: azure-keyvault
+      key: azure-storage-account-name
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-storage-account-key
+    injectAs: env
+    envVar: AZURE_STORAGE_ACCOUNT_KEY
+    externalRef:
+      provider: azure-keyvault
+      key: azure-storage-account-key
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-storage-container
+    injectAs: env
+    envVar: AZURE_STORAGE_CONTAINER
+    externalRef:
+      provider: azure-keyvault
+      key: azure-storage-container
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: synapse-spark-pool-name
+    injectAs: env
+    envVar: synapse_spark_pool_name
+    externalRef:
+      provider: azure-keyvault
+      key: synapse-spark-pool-name
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: synapse-workspace-name
+    injectAs: env
+    envVar: synapse_workspace_name
+    externalRef:
+      provider: azure-keyvault
+      key: synapse-workspace-name
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: azure-subscription-id
+    injectAs: env
+    envVar: azure_subscription_id
+    externalRef:
+      provider: azure-keyvault
+      key: azure-subscription-id
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: langfuse-secret-key
+    injectAs: env
+    envVar: LANGFUSE_SECRET_KEY
+    externalRef:
+      provider: azure-keyvault
+      key: langfuse-secret-key
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: langfuse-public-key
+    injectAs: env
+    envVar: LANGFUSE_PUBLIC_KEY
+    externalRef:
+      provider: azure-keyvault
+      key: langfuse-public-key
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+  - name: langfuse-host
+    injectAs: env
+    envVar: LANGFUSE_HOST
+    externalRef:
+      provider: azure-keyvault
+      key: langfuse-host
+      vaultUrl: https://wdf-secret-manager.vault.azure.net/
+modifications:
+  description: |
+    The financial analysis application Dockerfiles use Java 17, but Debian Trixie
+    (used in python:3.11-slim) only has Java 21 available.
+  required_changes:
+  - type: update_file
+    path: .dockerignore
+    description: Exclude parquet files from build context (downloaded at runtime via CMD)
+    changes:
+    - find: "# src_data/*.parquet"
+      replace: "src_data/*.parquet"
+  - type: update_file
+    path: Dockerfile
+    description: Update Java version from 17 to 21 for Debian Trixie compatibility,
+      skip COPY of large parquet data (downloaded at runtime), and fix broken CMD
+    changes:
+    - find: openjdk-17-jre-headless
+      replace: openjdk-21-jre-headless
+    - find: JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+      replace: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+    - find: "COPY src_data ./src_data"
+      replace: "RUN mkdir -p src_data"
+    - find: 'CMD ["python", "run_local.py"]'
+      replace: 'CMD ["sh", "-c", "rm -f src_data/*.parquet && python download_data.py
+        --years 2024 --service-types yellow green fhv fhvhv --months 1 && uvicorn
+        api:app --host 0.0.0.0 --port 8000"]'
+  - type: update_file
+    path: Dockerfile.streamlit
+    description: Update Java version from 17 to 21 for Debian Trixie compatibility
+      and fix CMD in Streamlit Dockerfile
+    changes:
+    - find: openjdk-17-jre-headless
+      replace: openjdk-21-jre-headless
+    - find: JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+      replace: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+    - find: 'CMD ["python", "run_local.py"]'
+      replace: 'CMD ["sh", "-c", "rm -f src_data/*.parquet && python download_data.py
+        --years 2024 --service-types yellow green fhv fhvhv --months 1 && streamlit
+        run streamlit_app.py --server.port=8501 --server.address=0.0.0.0"]'
+source:
+  repo: https://github.com/7sg-ai/financial-analysis
+  branch: main
+  path: .
+dataSources:
+  inputs:
+  - name: llm-endpoint
+    dsdfRef: dsdf/llm-endpoint.dsdf.yaml
+  outputs: []
+scenarios:
+  native:
+    description: 'Azure Container Apps with : standard deployment using
+      Azure OpenAI for LLM-powered financial queries on NYC taxi data.'
+    topology:
+      components:
+      - &api
+        name: financial-analysis-api
+        role: api
+        runtime:
+          platform: container-apps
+          regions:
+          - eastus2
+          dockerfile: Dockerfile
+          image:
+            registry: uvfinancialsourceacr.azurecr.io
+            repository: financial-analysis-api
+            tag: latest
+          env:
+          - name: API_HOST
+            value: 0.0.0.0
+          - name: API_PORT
+            value: '8000'
+          - name: LOG_LEVEL
+            value: INFO
+          - name: DATA_PATH
+            value: ./src_data
+          - name: USE_LOCAL_SPARK
+            value: 'true'
+          - name: SPARK_MASTER
+            value: local[*]
+          - name: JAVA_HOME
+            value: /usr/lib/jvm/java-21-openjdk-amd64
+          - name: AZURE_OPENAI_DEPLOYMENT_NAME
+            value: gpt-4.1-mini
+          - name: AZURE_OPENAI_API_VERSION
+            value: 2024-02-15-preview
+          - name: AZURE_RESOURCE_GROUP
+            value: financial-analysis-rg-source
+          envFromSecretRefs:
+          - azure-openai-endpoint
+          - azure-openai-api-key
+          - azure-synapse-workspace-name
+          - azure-synapse-spark-pool-name
+          - azure-storage-account-name
+          - azure-storage-account-key
+          - azure-storage-container
+          - azure-subscription-id
+          - langfuse-secret-key
+          - langfuse-public-key
+          - langfuse-host
+          resources:
+            cpu: '2'
+            memory: 4Gi
+          autoscaling:
+            minReplicas: 1
+            maxReplicas: 3
+            policy:
+              metric: cpu
+              target: 70
+        endpoints:
+        - name: http
+          port: 8000
+          exposure: internal
+          protocol: http
+          path: /
+      - &ui
+        name: financial-analysis-streamlit
+        role: ui
+        runtime:
+          platform: container-apps
+          regions:
+          - eastus2
+          dockerfile: Dockerfile.streamlit
+          image:
+            registry: uvfinancialsourceacr.azurecr.io
+            repository: financial-analysis-streamlit
+            tag: latest
+          env:
+          - name: STREAMLIT_HOST
+            value: 0.0.0.0
+          - name: STREAMLIT_PORT
+            value: '8501'
+          - name: AZURE_RESOURCE_GROUP
+            value: financial-analysis-rg-source
+          envFromSecretRefs:
+          - azure-openai-endpoint
+          - azure-openai-api-key
+          - azure-synapse-workspace-name
+          - azure-synapse-spark-pool-name
+          - azure-storage-account-name
+          - azure-storage-account-key
+          - azure-storage-container
+          - azure-subscription-id
+          - langfuse-secret-key
+          - langfuse-public-key
+          - langfuse-host
+          resources:
+            cpu: '2'
+            memory: 4Gi
+          autoscaling:
+            minReplicas: 1
+            maxReplicas: 2
+            policy:
+              metric: cpu
+              target: 70
+        endpoints:
+        - name: http
+          port: 8501
+          exposure: public
+          protocol: http
+          path: /
+        dependsOn:
+        - financial-analysis-api
+    deployments:
+    - name: azure-container-apps-gpt4.1mini
+      target:
+        provider: azure
+        region: eastus2
+        tdfRef: azure-east
+        cluster: financial-analysis-env-eastus2
+        namespace: financial-analysis
+      identityRef: azure-managed-identity://financial-analysis
+      secretStores:
+        primary: wdf-secret-manager
+      components:
+      - financial-analysis-api
+      - financial-analysis-streamlit
+      overrides:
+        components:
+          financial-analysis-api:
+            runtime:
+              image:
+                registry: uvfinancialsourceacr.azurecr.io
+                repository: financial-analysis-api
+                tag: latest
+          financial-analysis-streamlit:
+            runtime:
+              image:
+                registry: uvfinancialsourceacr.azurecr.io
+                repository: financial-analysis-streamlit
+                tag: latest
+  alternates:
+  - name: azure-container-apps-gpt-4.1-nano
+    description: 'Azure Container Apps setup but using gpt-4.1-nano . Uses the same Key Vault and infrastructure.'
+    topology:
+      components:
+      - name: financial-analysis-api
+        role: api
+        runtime:
+          platform: container-apps
+          regions:
+          - eastus2
+          dockerfile: Dockerfile
+          image:
+            registry: uvfinancialaltacr.azurecr.io
+            repository: financial-analysis-api
+            tag: latest
+          env:
+          - name: API_HOST
+            value: 0.0.0.0
+          - name: API_PORT
+            value: '8000'
+          - name: LOG_LEVEL
+            value: INFO
+          - name: DATA_PATH
+            value: ./src_data
+          - name: USE_LOCAL_SPARK
+            value: 'true'
+          - name: SPARK_MASTER
+            value: local[*]
+          - name: JAVA_HOME
+            value: /usr/lib/jvm/java-21-openjdk-amd64
+          - name: AZURE_OPENAI_DEPLOYMENT_NAME
+            value: gpt-4.1-nano
+          - name: AZURE_OPENAI_API_VERSION
+            value: 2024-12-01-preview
+          - name: AZURE_RESOURCE_GROUP
+            value: financial-analysis-alt-rg
+          envFromSecretRefs:
+          - azure-openai-endpoint
+          - azure-openai-api-key
+          - azure-synapse-workspace-name
+          - azure-synapse-spark-pool-name
+          - azure-storage-account-name
+          - azure-storage-account-key
+          - azure-storage-container
+          - azure-subscription-id
+          - langfuse-secret-key
+          - langfuse-public-key
+          - langfuse-host
+          resources:
+            cpu: '2'
+            memory: 4Gi
+          autoscaling:
+            minReplicas: 1
+            maxReplicas: 3
+            policy:
+              metric: cpu
+              target: 70
+        endpoints:
+        - name: http
+          port: 8000
+          exposure: internal
+          protocol: http
+          path: /
+      - name: financial-analysis-streamlit
+        role: ui
+        runtime:
+          platform: container-apps
+          regions:
+          - eastus2
+          dockerfile: Dockerfile.streamlit
+          image:
+            registry: uvfinancialaltacr.azurecr.io
+            repository: financial-analysis-streamlit
+            tag: latest
+          env:
+          - name: STREAMLIT_HOST
+            value: 0.0.0.0
+          - name: STREAMLIT_PORT
+            value: '8501'
+          - name: AZURE_RESOURCE_GROUP
+            value: financial-analysis-alt-rg
+          envFromSecretRefs:
+          - azure-openai-endpoint
+          - azure-openai-api-key
+          - azure-synapse-workspace-name
+          - azure-synapse-spark-pool-name
+          - azure-storage-account-name
+          - azure-storage-account-key
+          - azure-storage-container
+          - azure-subscription-id
+          - langfuse-secret-key
+          - langfuse-public-key
+          - langfuse-host
+          resources:
+            cpu: '2'
+            memory: 4Gi
+          autoscaling:
+            minReplicas: 1
+            maxReplicas: 2
+            policy:
+              metric: cpu
+              target: 70
+        endpoints:
+        - name: http
+          port: 8501
+          exposure: public
+          protocol: http
+          path: /
+        dependsOn:
+        - financial-analysis-api
+    deployments:
+    - name: azure-container-apps-gpt4.1nano
+      target:
+        provider: azure
+        region: eastus2
+        tdfRef: azure-east-fa-alt
+        cluster: financial-analysis-alt-env-eastus2
+        namespace: financial-analysis
+      identityRef: azure-managed-identity://financial-analysis
+      secretStores:
+        primary: wdf-secret-manager
+      components:
+      - financial-analysis-api
+      - financial-analysis-streamlit
+      overrides:
+        components:
+          financial-analysis-api:
+            runtime:
+              image:
+                registry: uvfinancialaltacr.azurecr.io
+                repository: financial-analysis-api
+                tag: latest
+              env:
+              - name: AZURE_OPENAI_DEPLOYMENT_NAME
+                value: gpt-4.1-nano
+              - name: AZURE_OPENAI_API_VERSION
+                value: 2024-12-01-preview
+              - name: AZURE_RESOURCE_GROUP
+                value: financial-analysis-alt-rg
+          financial-analysis-streamlit:
+            runtime:
+              image:
+                registry: uvfinancialaltacr.azurecr.io
+                repository: financial-analysis-streamlit
+                tag: latest

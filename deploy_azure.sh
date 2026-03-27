@@ -316,36 +316,37 @@ if ! az synapse spark pool show \
         --resource-group "$RESOURCE_GROUP" \
         --name "$SYNAPSE_SPARK_POOL_NAME" \
         --node-count 3 \
-        --node-size Medium \
+        --node-size Small \
         --spark-version 3.3 \
-        --enable-auto-scale true \
-        --min-node-count 3 \
-        --max-node-count 6 \
-        --enable-dynamic-exec true \
-        --min-executors 1 \
-        --max-executors 5 \
-        --output none
-    echo "✓ Spark pool created (autoscale 3–6 Medium nodes, up to 48 vCores, dynamic allocation enabled)"
-else
-    echo "✓ Spark pool exists"
+#        --enable-auto-scale true \
+#        --min-node-count 3 \
+#        --max-node-count 6 \
+#        --enable-dynamic-exec true \
+#        --min-executors 1 \
+#        --max-executors 5 \
+#        --output none
+#    echo "✓ Spark pool created (autoscale 3–6 Medium nodes, up to 48 vCores, dynamic allocation enabled)"
+    echo "✓ Spark pool created 3 Small nodes"
+#else
+#    echo "✓ Spark pool exists"
     # Ensure autoscale (3–10 nodes) and dynamic executor allocation are enabled
-    echo "Ensuring pool autoscale and dynamic executor allocation..."
-    if az synapse spark pool update \
-        --workspace-name "$SYNAPSE_WORKSPACE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --name "$SYNAPSE_SPARK_POOL_NAME" \
-        --node-size Medium \
-        --enable-auto-scale true \
-        --min-node-count 3 \
-        --max-node-count 6 \
-        --enable-dynamic-exec true \
-        --min-executors 1 \
-        --max-executors 5 \
-        --output none 2>/dev/null; then
-        echo "  ✓ Autoscale 3–6 Medium nodes (up to 48 vCores), dynamic allocation enabled"
-    else
-        echo "  (Autoscale or dynamic allocation may already be configured)"
-    fi
+#    echo "Ensuring pool autoscale and dynamic executor allocation..."
+#    if az synapse spark pool update \
+#        --workspace-name "$SYNAPSE_WORKSPACE_NAME" \
+#        --resource-group "$RESOURCE_GROUP" \
+#        --name "$SYNAPSE_SPARK_POOL_NAME" \
+#        --node-size Medium \
+#        --enable-auto-scale true \
+#        --min-node-count 3 \
+#        --max-node-count 6 \
+#        --enable-dynamic-exec true \
+#        --min-executors 1 \
+#        --max-executors 5 \
+#        --output none 2>/dev/null; then
+#        echo "  ✓ Autoscale 3–6 Medium nodes (up to 48 vCores), dynamic allocation enabled"
+#    else
+#        echo "  (Autoscale or dynamic allocation may already be configured)"
+#    fi
 fi
 
 # Create container registry if it doesn't exist (needed for all options)

@@ -5,6 +5,7 @@ Uses Azure Synapse Spark exclusively (no local PySpark).
 """
 from typing import Dict, Any, Optional, List
 import logging
+from langfuse.decorators import langfuse_context, observe
 
 from synapse_client import create_synapse_session, SynapseConnectionError
 from data_loader import DataLoader
@@ -85,6 +86,7 @@ class FinancialAnalysisEngine:
             logger.info("Data views refreshed")
         return success
     
+    @observe(name="analyze")
     def analyze(
         self,
         question: str,
@@ -237,6 +239,7 @@ class FinancialAnalysisEngine:
                 metadata={'error': str(e)}
             )
     
+    @observe(name="execute_custom_query")
     def execute_custom_query(
         self,
         query: str,
@@ -320,6 +323,7 @@ class FinancialAnalysisEngine:
                 metadata={'error': str(e)}
             )
     
+    @observe(name="get_suggestions")
     def get_suggestions(self, question: str) -> List[str]:
         """
         Get related question suggestions
@@ -362,6 +366,11 @@ class FinancialAnalysisEngine:
         return self.query_executor.get_query_history(limit=limit)
     
     def shutdown(self) -> None:
+    
+        from langfuse.decorators import langfuse_context
+    
+        langfuse_context.flush()
+
         """Shutdown the engine and close Synapse session."""
         logger.info("Shutting down FinancialAnalysisEngine")
         try:

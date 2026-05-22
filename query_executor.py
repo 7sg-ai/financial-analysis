@@ -2,6 +2,7 @@
 Query execution engine for Spark SQL via Azure Synapse (Livy)
 Executes queries remotely in Synapse; no local Spark.
 """
+
 from typing import Dict, List, Any, Optional, TYPE_CHECKING
 import logging
 import re
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 
 class QueryExecutionError(Exception):
     """Custom exception for query execution errors"""
+
     pass
 
 
@@ -28,7 +30,9 @@ class QueryExecutor:
         self.session = session
         self.max_result_rows = max_result_rows
         self._query_history: List[Dict[str, Any]] = []
-        logger.info(f"QueryExecutor initialized (Synapse) max_result_rows={max_result_rows}")
+        logger.info(
+            f"QueryExecutor initialized (Synapse) max_result_rows={max_result_rows}"
+        )
 
     def execute_query(
         self,
@@ -66,20 +70,30 @@ class QueryExecutor:
             result["data"] = r.get("data", [])
             result["columns"] = r.get("columns", [])
             result["row_count"] = r.get("row_count", len(result["data"]))
-            result["execution_time_ms"] = int((datetime.now() - start).total_seconds() * 1000)
+            result["execution_time_ms"] = int(
+                (datetime.now() - start).total_seconds() * 1000
+            )
             result["success"] = True
-            self._add_to_history(query, True, result["execution_time_ms"], result["row_count"])
-            logger.info(f"Query succeeded: {result['row_count']} rows, {result['execution_time_ms']}ms")
+            self._add_to_history(
+                query, True, result["execution_time_ms"], result["row_count"]
+            )
+            logger.info(
+                f"Query succeeded: {result['row_count']} rows, {result['execution_time_ms']}ms"
+            )
         except SynapseExecutionError as e:
             result["error"] = str(e)
             result["error_trace"] = traceback.format_exc()
-            result["execution_time_ms"] = int((datetime.now() - start).total_seconds() * 1000)
+            result["execution_time_ms"] = int(
+                (datetime.now() - start).total_seconds() * 1000
+            )
             self._add_to_history(query, False, result["execution_time_ms"], 0, str(e))
             logger.error(f"Query failed: {e}")
         except Exception as e:
             result["error"] = str(e)
             result["error_trace"] = traceback.format_exc()
-            result["execution_time_ms"] = int((datetime.now() - start).total_seconds() * 1000)
+            result["execution_time_ms"] = int(
+                (datetime.now() - start).total_seconds() * 1000
+            )
             self._add_to_history(query, False, result["execution_time_ms"], 0, str(e))
             logger.error(f"Query failed: {e}")
 

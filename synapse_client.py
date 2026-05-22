@@ -2,6 +2,7 @@
 Azure Synapse Spark client via Livy REST API.
 All Spark execution happens remotely in Synapse; no local PySpark.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,11 +32,13 @@ SESSION_STARTUP_TIMEOUT_SEC = None
 
 class SynapseConnectionError(Exception):
     """Raised when connection to Azure Synapse fails"""
+
     pass
 
 
 class SynapseExecutionError(Exception):
     """Raised when statement execution fails in Synapse"""
+
     pass
 
 
@@ -101,9 +104,7 @@ class SynapseSparkSession:
         )
 
         logger.info("Creating Synapse Spark session...")
-        session = self._client.spark_session.create_spark_session(
-            opts, detailed=True
-        )
+        session = self._client.spark_session.create_spark_session(opts, detailed=True)
         self._session_id = session.id
         logger.info(f"Synapse session created: id={self._session_id}")
 
@@ -139,8 +140,10 @@ class SynapseSparkSession:
             if not details and hasattr(session, "as_dict"):
                 d = session.as_dict()
                 err_bits = [
-                    str(v) for k, v in (d or {}).items()
-                    if v and ("error" in str(k).lower() or "exception" in str(k).lower())
+                    str(v)
+                    for k, v in (d or {}).items()
+                    if v
+                    and ("error" in str(k).lower() or "exception" in str(k).lower())
                 ]
                 if err_bits:
                     details.append("; ".join(err_bits[:3]))  # limit length
@@ -189,9 +192,7 @@ class SynapseSparkSession:
             raise SynapseConnectionError("Not connected to Synapse")
 
         opts = SparkStatementOptions(code=code, kind=kind)
-        stmt = self._client.spark_session.create_spark_statement(
-            self._session_id, opts
-        )
+        stmt = self._client.spark_session.create_spark_statement(self._session_id, opts)
         stmt_id = stmt.id
 
         # Poll for completion
@@ -290,7 +291,7 @@ print(json.dumps(result))
         # Columns that often vary as int/bigint/double across NYC TLC files
         cast_cols = '["PULocationID", "DOLocationID", "PUlocationID", "DOlocationID", "SR_Flag", "VendorID", "RatecodeID", "passenger_count", "payment_type", "trip_type"]'
         # List files: try mssparkutils first (Synapse); fallback to Hadoop GlobStatus
-        list_files = '''
+        list_files = """
 try:
     files = [f.path for f in mssparkutils.fs.ls(base_dir) if fnmatch.fnmatch(f.name, pattern)]
 except NameError:
@@ -301,7 +302,7 @@ except NameError:
     fs = FileSystem.get(Path(glob_path).toUri(), conf)
     statuses = fs.globStatus(Path(glob_path))
     files = [str(s.getPath().toString()) for s in (statuses or [])]
-'''
+"""
         if months:
             month_filter = ",".join(f'"{m}"' for m in months)
             code = f'''

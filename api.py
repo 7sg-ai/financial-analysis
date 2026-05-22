@@ -2,6 +2,7 @@
 FastAPI REST API for Financial Analysis
 Provides endpoints for query-based financial analysis
 """
+
 from fastapi import FastAPI, HTTPException, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse
@@ -15,12 +16,12 @@ from config import get_settings
 from analysis_engine import FinancialAnalysisEngine
 from langfuse.decorators import langfuse_context
 import atexit
+
 atexit.register(langfuse_context.flush)
 
 # Configure logging - set to DEBUG for troubleshooting
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ async def poll_for_data_files():
     """Background task to periodically check for new data files"""
     global engine
     poll_interval = 300  # Check every 5 minutes
-    
+
     while True:
         try:
             await asyncio.sleep(poll_interval)
@@ -48,12 +49,12 @@ async def poll_for_data_files():
 async def lifespan(app: FastAPI):
     """Manage application lifespan"""
     global engine
-    
+
     # Startup - wait indefinitely for Synapse; do not exit/restart container
     logger.info("Starting Financial Analysis API...")
     settings = get_settings()
     logger.info(f"DATA_PATH={settings.data_path}")
-    
+
     while True:
         try:
             engine = FinancialAnalysisEngine(settings)
@@ -63,18 +64,22 @@ async def lifespan(app: FastAPI):
                 logger.info("Financial Analysis Engine initialized successfully")
             except Exception as e:
                 logger.warning(f"Data initialization skipped (no files found): {e}")
-                logger.info("Application will start and poll for data files periodically")
-            
+                logger.info(
+                    "Application will start and poll for data files periodically"
+                )
+
             # Start background task to poll for new data files
             asyncio.create_task(poll_for_data_files())
-            logger.info("Started background task to poll for new data files (every 5 minutes)")
+            logger.info(
+                "Started background task to poll for new data files (every 5 minutes)"
+            )
             break
         except Exception as e:
             logger.warning(f"Waiting for Synapse: {e}. Retrying in 30s...")
             await asyncio.sleep(30)
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down Financial Analysis API...")
     if engine:
@@ -87,7 +92,7 @@ app = FastAPI(
     title=settings.api_title,
     version=settings.api_version,
     description="Interactive financial analysis API using Azure Synapse Spark and Azure OpenAI",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Add CORS middleware
@@ -103,36 +108,34 @@ app.add_middleware(
 # Request/Response Models
 class AnalysisRequest(BaseModel):
     """Request model for analysis endpoint"""
+
     question: str = Field(..., description="Natural language question about the data")
     return_format: str = Field(
-        default="both",
-        description="Response format: 'tabular', 'narrative', or 'both'"
+        default="both", description="Response format: 'tabular', 'narrative', or 'both'"
     )
     include_narrative: bool = Field(
-        default=True,
-        description="Whether to include narrative explanation"
+        default=True, description="Whether to include narrative explanation"
     )
     max_rows: Optional[int] = Field(
-        default=None,
-        description="Maximum number of rows to return"
+        default=None, description="Maximum number of rows to return"
     )
 
 
 class CustomQueryRequest(BaseModel):
     """Request model for custom query endpoint"""
+
     query: str = Field(..., description="SQL query to execute")
     question_context: Optional[str] = Field(
-        default=None,
-        description="Optional context for narrative generation"
+        default=None, description="Optional context for narrative generation"
     )
     include_narrative: bool = Field(
-        default=False,
-        description="Whether to generate narrative"
+        default=False, description="Whether to generate narrative"
     )
 
 
 class AnalysisResult(BaseModel):
     """Response model for analysis results"""
+
     question: str
     query: str
     results: List[Dict[str, Any]]
@@ -143,6 +146,7 @@ class AnalysisResult(BaseModel):
 
 
 # API Endpoints
+
 
 @app.get("/")
 async def root():
@@ -159,8 +163,8 @@ async def root():
             "history": "/api/history - Get query history",
             "data_status": "/api/data-status - Get status of data files and loaded views",
             "reload_data": "/api/reload-data - Manually trigger data reload from files",
-            "health": "/health - Health check"
-        }
+            "health": "/health - Health check",
+        },
     }
 
 
@@ -169,11 +173,11 @@ async def health_check():
     """Health check endpoint"""
     if engine is None:
         raise HTTPException(status_code=503, detail="Engine not initialized")
-    
+
     return {
         "status": "healthy",
         "engine_initialized": engine is not None,
-        "data_loaded": engine._data_loaded if engine else False
+        "data_loaded": engine._data_loaded if engine else False,
     }
 
 
@@ -181,31 +185,35 @@ async def health_check():
 async def get_data_status():
     """
     Get status of data files and loaded views
-    
+
     Shows what files exist in src_data directory and what Spark SQL views are currently registered.
     """
     if engine is None:
         raise HTTPException(status_code=503, detail="Engine not initialized")
-    
+
     try:
         import glob
         from pathlib import Path
-        
+
         # Get data path from settings
         data_path_str = engine.settings.data_path
         data_path = Path(data_path_str)
-        
+
         # List all parquet files (local path only; abfss paths can't be listed via glob)
         parquet_files = []
         if data_path_str.startswith("abfss://"):
             parquet_files = ["(Azure Storage - file listing not available)"]
         elif data_path.exists():
-            for pattern in ["yellow_tripdata_*.parquet", "green_tripdata_*.parquet", 
-                          "fhv_tripdata_*.parquet", "fhvhv_tripdata_*.parquet"]:
+            for pattern in [
+                "yellow_tripdata_*.parquet",
+                "green_tripdata_*.parquet",
+                "fhv_tripdata_*.parquet",
+                "fhvhv_tripdata_*.parquet",
+            ]:
                 files = glob.glob(str(data_path / pattern))
                 parquet_files.extend([Path(f).name for f in files])
             parquet_files.sort()
-        
+
         # Get registered views via data loader stats (Synapse)
         registered_views = []
         view_details = {}
@@ -228,62 +236,73 @@ async def get_data_status():
                     }
         except Exception as e:
             logger.warning(f"Error getting view stats: {e}")
-        
-        
+
         return {
             "data_loaded": engine._data_loaded,
             "data_path": data_path_str,
             "files": {
-                "total_parquet_files": len(parquet_files) if parquet_files and not parquet_files[0].startswith("(") else 0,
+                "total_parquet_files": len(parquet_files)
+                if parquet_files and not parquet_files[0].startswith("(")
+                else 0,
                 "parquet_files": parquet_files,
                 "files_by_type": {
                     "yellow": [f for f in parquet_files if f.startswith("yellow")],
                     "green": [f for f in parquet_files if f.startswith("green")],
                     "fhv": [f for f in parquet_files if f.startswith("fhv_tripdata")],
-                    "fhvhv": [f for f in parquet_files if f.startswith("fhvhv")]
-                }
+                    "fhvhv": [f for f in parquet_files if f.startswith("fhvhv")],
+                },
             },
             "views": {
                 "registered": registered_views,
                 "expected": ["yellow_taxi", "green_taxi", "fhv", "fhvhv"],
-                "missing": [v for v in ["yellow_taxi", "green_taxi", "fhv", "fhvhv"] if v not in registered_views],
-                "details": view_details
-            }
+                "missing": [
+                    v
+                    for v in ["yellow_taxi", "green_taxi", "fhv", "fhvhv"]
+                    if v not in registered_views
+                ],
+                "details": view_details,
+            },
         }
     except Exception as e:
         logger.error(f"Error getting data status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to get data status: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get data status: {str(e)}"
+        )
 
 
 @app.post("/api/reload-data")
 async def reload_data(
-    year: Optional[str] = Query(default=None, description="Year to load (omit to load all years)"),
-    months: Optional[List[str]] = Query(default=None, description="Months to load (e.g., ['01', '02'])")
+    year: Optional[str] = Query(
+        default=None, description="Year to load (omit to load all years)"
+    ),
+    months: Optional[List[str]] = Query(
+        default=None, description="Months to load (e.g., ['01', '02'])"
+    ),
 ):
     """
     Manually trigger data reload from files in src_data directory
-    
+
     This endpoint checks for new parquet files and reloads/refreshes the Spark SQL views.
     Useful when files have been added after the initial startup.
     """
     if engine is None:
         raise HTTPException(status_code=503, detail="Engine not initialized")
-    
+
     try:
         logger.info(f"Manual data reload triggered for year={year}, months={months}")
         success = engine.check_and_reload_data(months=months, year=year)
-        
+
         if success:
             return {
                 "status": "success",
                 "message": "Data reloaded successfully",
-                "data_loaded": engine._data_loaded
+                "data_loaded": engine._data_loaded,
             }
         else:
             return {
                 "status": "no_change",
                 "message": "No new data files found or data already loaded",
-                "data_loaded": engine._data_loaded
+                "data_loaded": engine._data_loaded,
             }
     except Exception as e:
         logger.error(f"Error reloading data: {e}", exc_info=True)
@@ -294,36 +313,44 @@ async def reload_data(
 async def analyze(request: AnalysisRequest):
     """
     Analyze data using natural language question
-    
+
     Returns results in JSON format with optional narrative explanation
     """
     if engine is None:
         raise HTTPException(status_code=503, detail="Engine not initialized")
-    
+
     try:
         logger.info(f"Received analysis request: {request.question}")
-        logger.debug(f"Request parameters: return_format={request.return_format}, include_narrative={request.include_narrative}, max_rows={request.max_rows}")
-        
+        logger.debug(
+            f"Request parameters: return_format={request.return_format}, include_narrative={request.include_narrative}, max_rows={request.max_rows}"
+        )
+
         response = engine.analyze(
             question=request.question,
             return_format=request.return_format,
             include_narrative=request.include_narrative,
-            max_rows=request.max_rows
+            max_rows=request.max_rows,
         )
-        
+
         # Debug: Log response structure
         response_dict = response.to_dict()
         logger.info(f"Analysis response structure: keys={list(response_dict.keys())}")
-        logger.info(f"Response result_count: {response_dict.get('result_count', 'N/A')}")
+        logger.info(
+            f"Response result_count: {response_dict.get('result_count', 'N/A')}"
+        )
         logger.info(f"Response results type: {type(response_dict.get('results'))}")
         logger.info(f"Response results length: {len(response_dict.get('results', []))}")
-        if response_dict.get('results'):
-            logger.debug(f"First result sample: {response_dict['results'][0] if len(response_dict['results']) > 0 else 'N/A'}")
+        if response_dict.get("results"):
+            logger.debug(
+                f"First result sample: {response_dict['results'][0] if len(response_dict['results']) > 0 else 'N/A'}"
+            )
         logger.debug(f"Response metadata: {response_dict.get('metadata', {})}")
-        logger.debug(f"Response narrative present: {bool(response_dict.get('narrative'))}")
-        
+        logger.debug(
+            f"Response narrative present: {bool(response_dict.get('narrative'))}"
+        )
+
         return response_dict
-        
+
     except Exception as e:
         logger.error(f"Error processing analysis request: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -333,23 +360,23 @@ async def analyze(request: AnalysisRequest):
 async def execute_query(request: CustomQueryRequest):
     """
     Execute a custom SQL query
-    
+
     Allows direct SQL execution with optional narrative generation
     """
     if engine is None:
         raise HTTPException(status_code=503, detail="Engine not initialized")
-    
+
     try:
         logger.info(f"Received custom query request")
-        
+
         response = engine.execute_custom_query(
             query=request.query,
             include_narrative=request.include_narrative,
-            question_context=request.question_context
+            question_context=request.question_context,
         )
-        
+
         return response.to_dict()
-        
+
     except Exception as e:
         logger.error(f"Error executing custom query: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -358,27 +385,27 @@ async def execute_query(request: CustomQueryRequest):
 @app.get("/api/analyze/tabular")
 async def analyze_tabular(
     question: str = Query(..., description="Natural language question"),
-    format: str = Query(default="grid", description="Table format (grid, simple, html, etc.)")
+    format: str = Query(
+        default="grid", description="Table format (grid, simple, html, etc.)"
+    ),
 ):
     """
     Analyze data and return results as formatted table
-    
+
     Returns plain text formatted table
     """
     if engine is None:
         raise HTTPException(status_code=503, detail="Engine not initialized")
-    
+
     try:
         response = engine.analyze(
-            question=question,
-            return_format="tabular",
-            include_narrative=False
+            question=question, return_format="tabular", include_narrative=False
         )
-        
+
         table = response.to_tabular(format=format)
-        
+
         return PlainTextResponse(content=table)
-        
+
     except Exception as e:
         logger.error(f"Error in tabular analysis: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -386,27 +413,25 @@ async def analyze_tabular(
 
 @app.get("/api/analyze/narrative")
 async def analyze_narrative(
-    question: str = Query(..., description="Natural language question")
+    question: str = Query(..., description="Natural language question"),
 ):
     """
     Analyze data and return narrative explanation only
-    
+
     Returns plain text narrative
     """
     if engine is None:
         raise HTTPException(status_code=503, detail="Engine not initialized")
-    
+
     try:
         response = engine.analyze(
-            question=question,
-            return_format="narrative",
-            include_narrative=True
+            question=question, return_format="narrative", include_narrative=True
         )
-        
+
         narrative = response.narrative or "No narrative generated"
-        
+
         return PlainTextResponse(content=narrative)
-        
+
     except Exception as e:
         logger.error(f"Error in narrative analysis: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -414,27 +439,25 @@ async def analyze_narrative(
 
 @app.get("/api/analyze/markdown")
 async def analyze_markdown(
-    question: str = Query(..., description="Natural language question")
+    question: str = Query(..., description="Natural language question"),
 ):
     """
     Analyze data and return results in Markdown format
-    
+
     Returns Markdown formatted response with narrative and table
     """
     if engine is None:
         raise HTTPException(status_code=503, detail="Engine not initialized")
-    
+
     try:
         response = engine.analyze(
-            question=question,
-            return_format="both",
-            include_narrative=True
+            question=question, return_format="both", include_narrative=True
         )
-        
+
         markdown = response.to_markdown()
-        
+
         return PlainTextResponse(content=markdown)
-        
+
     except Exception as e:
         logger.error(f"Error in markdown analysis: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -442,22 +465,19 @@ async def analyze_markdown(
 
 @app.get("/api/suggestions")
 async def get_suggestions(
-    question: str = Query(..., description="Question to get suggestions for")
+    question: str = Query(..., description="Question to get suggestions for"),
 ):
     """
     Get related question suggestions based on a question
     """
     if engine is None:
         raise HTTPException(status_code=503, detail="Engine not initialized")
-    
+
     try:
         suggestions = engine.get_suggestions(question)
-        
-        return {
-            "question": question,
-            "suggestions": suggestions
-        }
-        
+
+        return {"question": question, "suggestions": suggestions}
+
     except Exception as e:
         logger.error(f"Error getting suggestions: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -470,15 +490,15 @@ async def get_datasets():
     """
     if engine is None:
         raise HTTPException(status_code=503, detail="Engine not initialized")
-    
+
     try:
         info = engine.get_dataset_info()
-        
+
         return {
             "datasets": info,
-            "description": "NYC Taxi and For-Hire Vehicle trip data for 2024"
+            "description": "NYC Taxi and For-Hire Vehicle trip data for 2024",
         }
-        
+
     except Exception as e:
         logger.error(f"Error getting dataset info: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -486,22 +506,21 @@ async def get_datasets():
 
 @app.get("/api/history")
 async def get_history(
-    limit: int = Query(default=10, ge=1, le=100, description="Number of history entries")
+    limit: int = Query(
+        default=10, ge=1, le=100, description="Number of history entries"
+    ),
 ):
     """
     Get recent query execution history
     """
     if engine is None:
         raise HTTPException(status_code=503, detail="Engine not initialized")
-    
+
     try:
         history = engine.get_query_history(limit=limit)
-        
-        return {
-            "count": len(history),
-            "history": history
-        }
-        
+
+        return {"count": len(history), "history": history}
+
     except Exception as e:
         logger.error(f"Error getting history: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -516,41 +535,40 @@ async def get_examples():
         "revenue_analysis": [
             "What was the total revenue from yellow taxis in 2024?",
             "Compare revenue between yellow and green taxis by month",
-            "Which taxi zones generated the most revenue?"
+            "Which taxi zones generated the most revenue?",
         ],
         "trip_analysis": [
             "How many trips were taken in January 2024?",
             "What is the average trip distance for HVFHS services?",
-            "Which hour of the day has the most trips?"
+            "Which hour of the day has the most trips?",
         ],
         "financial_metrics": [
             "What is the average tip percentage for credit card payments?",
             "Calculate the total driver pay vs passenger fares for HVFHS",
-            "What are the top 10 most profitable routes?"
+            "What are the top 10 most profitable routes?",
         ],
         "time_series": [
             "Show daily trip counts for March 2024",
             "What is the revenue trend by month?",
-            "Compare weekend vs weekday trip volumes"
+            "Compare weekend vs weekday trip volumes",
         ],
         "location_analysis": [
             "Which borough has the highest average fare?",
             "Top 10 pickup locations by trip count",
-            "Revenue breakdown by service zone"
-        ]
+            "Revenue breakdown by service zone",
+        ],
     }
-    
+
     return examples
 
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     uvicorn.run(
         "api:app",
         host=settings.api_host,
         port=settings.api_port,
         reload=True,
-        log_level=settings.log_level.lower()
+        log_level=settings.log_level.lower(),
     )
-

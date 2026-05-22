@@ -1,6 +1,7 @@
 """
 Data schemas and metadata for taxi trip datasets
 """
+
 from typing import Dict, List, Any
 from dataclasses import dataclass
 
@@ -8,6 +9,7 @@ from dataclasses import dataclass
 @dataclass
 class DatasetSchema:
     """Schema definition for a dataset"""
+
     name: str
     description: str
     columns: Dict[str, str]
@@ -39,19 +41,25 @@ YELLOW_TAXI_SCHEMA = DatasetSchema(
         "improvement_surcharge": "Improvement surcharge assessed trips",
         "total_amount": "Total amount charged to passengers (does not include cash tips)",
         "congestion_surcharge": "Congestion surcharge for trips in Manhattan",
-        "airport_fee": "Airport fee for pickups at LaGuardia and JFK"
+        "airport_fee": "Airport fee for pickups at LaGuardia and JFK",
     },
     financial_columns=[
-        "fare_amount", "extra", "mta_tax", "tip_amount", 
-        "tolls_amount", "improvement_surcharge", "total_amount",
-        "congestion_surcharge", "airport_fee"
+        "fare_amount",
+        "extra",
+        "mta_tax",
+        "tip_amount",
+        "tolls_amount",
+        "improvement_surcharge",
+        "total_amount",
+        "congestion_surcharge",
+        "airport_fee",
     ],
     date_columns=["tpep_pickup_datetime", "tpep_dropoff_datetime"],
     sample_queries=[
         "What was the total revenue from yellow taxis in January 2024?",
         "What is the average tip percentage by payment type?",
-        "Which pickup zones generated the highest revenue?"
-    ]
+        "Which pickup zones generated the highest revenue?",
+    ],
 )
 
 
@@ -78,19 +86,24 @@ GREEN_TAXI_SCHEMA = DatasetSchema(
         "improvement_surcharge": "Improvement surcharge",
         "total_amount": "Total amount charged",
         "congestion_surcharge": "Congestion surcharge",
-        "trip_type": "Code indicating street-hail or dispatch"
+        "trip_type": "Code indicating street-hail or dispatch",
     },
     financial_columns=[
-        "fare_amount", "extra", "mta_tax", "tip_amount",
-        "tolls_amount", "improvement_surcharge", "total_amount",
-        "congestion_surcharge"
+        "fare_amount",
+        "extra",
+        "mta_tax",
+        "tip_amount",
+        "tolls_amount",
+        "improvement_surcharge",
+        "total_amount",
+        "congestion_surcharge",
     ],
     date_columns=["lpep_pickup_datetime", "lpep_dropoff_datetime"],
     sample_queries=[
         "Compare green taxi revenue to yellow taxi revenue",
         "What are peak hours for green taxi trips?",
-        "Calculate average revenue per mile for green taxis"
-    ]
+        "Calculate average revenue per mile for green taxis",
+    ],
 )
 
 
@@ -105,15 +118,15 @@ FHV_SCHEMA = DatasetSchema(
         "PUlocationID": "TLC Taxi Zone for pickup",
         "DOlocationID": "TLC Taxi Zone for dropoff",
         "SR_Flag": "Shared ride flag (Y/N)",
-        "Affiliated_base_number": "Base number affiliated with the trip"
+        "Affiliated_base_number": "Base number affiliated with the trip",
     },
     financial_columns=[],  # FHV data doesn't include fare information
     date_columns=["pickup_datetime", "dropOff_datetime"],
     sample_queries=[
         "How many FHV trips were taken in 2024?",
         "What percentage of FHV trips are shared rides?",
-        "Which bases dispatch the most trips?"
-    ]
+        "Which bases dispatch the most trips?",
+    ],
 )
 
 
@@ -145,22 +158,30 @@ FHVHV_SCHEMA = DatasetSchema(
         "shared_match_flag": "Whether shared ride was matched (Y/N)",
         "access_a_ride_flag": "Whether trip was on behalf of Access-a-Ride (Y/N)",
         "wav_request_flag": "Whether wheelchair accessible vehicle requested (Y/N)",
-        "wav_match_flag": "Whether wheelchair accessible vehicle matched (Y/N)"
+        "wav_match_flag": "Whether wheelchair accessible vehicle matched (Y/N)",
     },
     financial_columns=[
-        "base_passenger_fare", "tolls", "bcf", "sales_tax",
-        "congestion_surcharge", "airport_fee", "tips", "driver_pay"
+        "base_passenger_fare",
+        "tolls",
+        "bcf",
+        "sales_tax",
+        "congestion_surcharge",
+        "airport_fee",
+        "tips",
+        "driver_pay",
     ],
     date_columns=[
-        "request_datetime", "on_scene_datetime", 
-        "pickup_datetime", "dropoff_datetime"
+        "request_datetime",
+        "on_scene_datetime",
+        "pickup_datetime",
+        "dropoff_datetime",
     ],
     sample_queries=[
         "What is the total revenue from HVFHS services in 2024?",
         "Compare driver pay to passenger fares",
         "What's the average wait time between request and pickup?",
-        "Calculate total tip revenue by month"
-    ]
+        "Calculate total tip revenue by month",
+    ],
 )
 
 
@@ -172,14 +193,14 @@ ZONE_SCHEMA = DatasetSchema(
         "LocationID": "Unique identifier for taxi zone",
         "Borough": "NYC borough name",
         "Zone": "Zone name/neighborhood",
-        "service_zone": "Service zone category"
+        "service_zone": "Service zone category",
     },
     financial_columns=[],
     date_columns=[],
     sample_queries=[
         "Which Manhattan zones have the highest trip volume?",
-        "Compare revenue across boroughs"
-    ]
+        "Compare revenue across boroughs",
+    ],
 )
 
 
@@ -189,7 +210,7 @@ SCHEMA_REGISTRY = {
     "green_taxi": GREEN_TAXI_SCHEMA,
     "fhv": FHV_SCHEMA,
     "fhvhv": FHVHV_SCHEMA,
-    "taxi_zones": ZONE_SCHEMA
+    "taxi_zones": ZONE_SCHEMA,
 }
 
 
@@ -199,22 +220,24 @@ def get_schema_context() -> str:
     """
     context_parts = [
         "# NYC Taxi and For-Hire Vehicle Trip Data Schema\n",
-        "## Available Datasets:\n"
+        "## Available Datasets:\n",
     ]
-    
+
     for schema_name, schema in SCHEMA_REGISTRY.items():
         context_parts.append(f"\n### {schema.name.upper()} Dataset")
         context_parts.append(f"Description: {schema.description}\n")
         context_parts.append("Columns:")
         for col, desc in schema.columns.items():
             context_parts.append(f"  - {col}: {desc}")
-        
+
         if schema.financial_columns:
-            context_parts.append(f"\nFinancial Columns: {', '.join(schema.financial_columns)}")
+            context_parts.append(
+                f"\nFinancial Columns: {', '.join(schema.financial_columns)}"
+            )
         if schema.date_columns:
             context_parts.append(f"Date Columns: {', '.join(schema.date_columns)}")
         context_parts.append("")
-    
+
     context_parts.append("\n## Data File Patterns:")
     context_parts.append("- Yellow Taxi: yellow_tripdata_YYYY-MM.parquet")
     context_parts.append("- Green Taxi: green_tripdata_YYYY-MM.parquet")
@@ -222,6 +245,5 @@ def get_schema_context() -> str:
     context_parts.append("- FHVHV: fhvhv_tripdata_YYYY-MM.parquet")
     context_parts.append("- Zone Lookup: taxi_zone_lookup.csv")
     context_parts.append("\nAll 2024 monthly data files (01-12) are available.")
-    
-    return "\n".join(context_parts)
 
+    return "\n".join(context_parts)

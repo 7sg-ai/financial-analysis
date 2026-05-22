@@ -3,6 +3,7 @@ Data loading module for Azure Synapse Spark
 Loads parquet/CSV data and registers temp views in Synapse (via Livy)
 All Spark execution happens in Azure Synapse; no local PySpark.
 """
+
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 import logging
 
@@ -43,22 +44,36 @@ class DataLoader:
         logger.info("Registering temporary views in Synapse...")
         views_registered = []
 
-        pattern = "yellow_tripdata_*-*.parquet" if not year else f"yellow_tripdata_{year}-*.parquet"
+        pattern = (
+            "yellow_tripdata_*-*.parquet"
+            if not year
+            else f"yellow_tripdata_{year}-*.parquet"
+        )
         if self.session.load_parquet_and_create_view(pattern, "yellow_taxi", months):
             views_registered.append("yellow_taxi")
             logger.info("Registered view: yellow_taxi")
 
-        pattern = "green_tripdata_*-*.parquet" if not year else f"green_tripdata_{year}-*.parquet"
+        pattern = (
+            "green_tripdata_*-*.parquet"
+            if not year
+            else f"green_tripdata_{year}-*.parquet"
+        )
         if self.session.load_parquet_and_create_view(pattern, "green_taxi", months):
             views_registered.append("green_taxi")
             logger.info("Registered view: green_taxi")
 
-        pattern = "fhv_tripdata_*-*.parquet" if not year else f"fhv_tripdata_{year}-*.parquet"
+        pattern = (
+            "fhv_tripdata_*-*.parquet" if not year else f"fhv_tripdata_{year}-*.parquet"
+        )
         if self.session.load_parquet_and_create_view(pattern, "fhv", months):
             views_registered.append("fhv")
             logger.info("Registered view: fhv")
 
-        pattern = "fhvhv_tripdata_*-*.parquet" if not year else f"fhvhv_tripdata_{year}-*.parquet"
+        pattern = (
+            "fhvhv_tripdata_*-*.parquet"
+            if not year
+            else f"fhvhv_tripdata_{year}-*.parquet"
+        )
         if self.session.load_parquet_and_create_view(pattern, "fhvhv", months):
             views_registered.append("fhvhv")
             logger.info("Registered view: fhvhv")
@@ -68,9 +83,13 @@ class DataLoader:
             logger.info("Registered view: taxi_zones")
 
         if views_registered:
-            logger.info(f"Registered {len(views_registered)} view(s): {', '.join(views_registered)}")
+            logger.info(
+                f"Registered {len(views_registered)} view(s): {', '.join(views_registered)}"
+            )
         else:
-            logger.warning("No data files found. Views will be registered when data is available.")
+            logger.warning(
+                "No data files found. Views will be registered when data is available."
+            )
 
         return len(views_registered) > 0
 
@@ -81,9 +100,13 @@ class DataLoader:
 
         for view in views:
             try:
-                r = self.session.execute_sql(f"SELECT * FROM {view} LIMIT 1", max_rows=1)
+                r = self.session.execute_sql(
+                    f"SELECT * FROM {view} LIMIT 1", max_rows=1
+                )
                 cols = r.get("columns", [])
-                cnt = self.session.execute_sql(f"SELECT COUNT(*) as cnt FROM {view}", max_rows=1)
+                cnt = self.session.execute_sql(
+                    f"SELECT COUNT(*) as cnt FROM {view}", max_rows=1
+                )
                 rows = cnt.get("data", [])
                 row_count = int(rows[0].get("cnt", 0)) if rows else 0
                 stats[view] = {

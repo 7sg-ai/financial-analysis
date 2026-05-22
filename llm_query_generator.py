@@ -3,7 +3,7 @@ LLM-powered query generation module using Azure OpenAI
 Converts natural language questions into Spark SQL queries
 """
 from typing import Optional, Dict, List, Any, Literal
-from openai import AzureOpenAI
+from langfuse.openai import AzureOpenAI
 import json
 import logging
 import re

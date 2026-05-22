@@ -13,6 +13,9 @@ from contextlib import asynccontextmanager
 
 from config import get_settings
 from analysis_engine import FinancialAnalysisEngine
+from langfuse.decorators import langfuse_context
+import atexit
+atexit.register(langfuse_context.flush)
 
 # Configure logging - set to DEBUG for troubleshooting
 logging.basicConfig(

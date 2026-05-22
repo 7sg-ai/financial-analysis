@@ -8,6 +8,7 @@ azure-identity==1.15.0
 azure-synapse-spark==0.7.0
 six>=1.16.0
 openai>=2.20.0,<3.0.0
+langfuse>=2.50.0
 azure-storage-blob==12.19.0
 
 # API and Web Framework

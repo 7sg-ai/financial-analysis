@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir -r requirements-streamlit.txt
 
 # Copy application code
 COPY *.py ./
-COPY src_data ./src_data
+RUN mkdir -p src_data
 
 # Create logs directory
 RUN mkdir -p logs

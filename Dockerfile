@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY *.py ./
-COPY src_data ./src_data
+RUN mkdir -p src_data
 
 # Create logs directory
 RUN mkdir -p logs
@@ -32,4 +32,3 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 # Run the API (Spark runs in Azure Synapse, not locally)
 CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
-

@@ -2,6 +2,7 @@ apiVersion: tdf.7sg.ai/v1
 kind: TargetDefinition
 metadata:
   name: azure-east-fa-alt
+  version: "1.0.0"
   displayName: Azure East - Financial Analysis Alternate (gpt-4.1-nano)
   description:
     Azure target in eastus2 for deploying the financial-analysis alternate
